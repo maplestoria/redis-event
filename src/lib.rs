@@ -1,7 +1,6 @@
-use std::alloc::handle_alloc_error;
-use std::io;
-use std::io::{BufWriter, Write};
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::io::{BufWriter, Error, Write};
+use std::net::{Shutdown, TcpStream};
+use std::result::Result;
 
 use crate::config::Config;
 use crate::constants::*;
@@ -10,7 +9,7 @@ mod constants;
 mod config;
 
 pub trait RedisEventListener {
-    fn open(&mut self);
+    fn open(&mut self) -> Result<(), Error>;
 
     fn close(&self);
 }
@@ -25,42 +24,46 @@ pub struct StandaloneEventListener {
 }
 
 impl StandaloneEventListener {
-    fn connect(&mut self) {
+    fn connect(&mut self) -> Result<(), Error> {
         let addr = format!("{}:{}", self.host, self.port);
         println!("connecting to {}", addr);
-        let stream = TcpStream::connect(addr).expect("Couldn't connect to server...");
+        let stream = TcpStream::connect(addr)?;
         println!("connected to server!");
         self.socket = Option::Some(BufWriter::new(stream));
 
         if !self.password.is_empty() {
-            self.send("AUTH".as_bytes(), &[self.password.as_bytes()]);
+            self.send("AUTH".as_bytes(), &[self.password.as_bytes()])?;
         }
+        Result::Ok(())
     }
 
-    fn send(&mut self, command: &[u8], args: &[&[u8]]) {
+    fn send(&mut self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
         let socket = self.socket.as_mut().unwrap();
-        socket.write(&[STAR]).unwrap();
+        socket.write(&[STAR])?;
         let args_len = args.len() + 1;
-        socket.write(args_len.to_string().as_bytes()).unwrap();
-        socket.write(&[CR, LF, DOLLAR]).unwrap();
-        socket.write(command.len().to_string().as_bytes()).unwrap();
-        socket.write(&[CR, LF]).unwrap();
-        socket.write(command).unwrap();
-        socket.write(&[CR, LF]).unwrap();
+        socket.write(args_len.to_string().as_bytes())?;
+        socket.write(&[CR, LF, DOLLAR])?;
+        socket.write(command.len().to_string().as_bytes())?;
+        socket.write(&[CR, LF])?;
+        socket.write(command)?;
+        socket.write(&[CR, LF])?;
         for arg in args {
-            socket.write(&[DOLLAR]).unwrap();
-            socket.write(arg.len().to_string().as_bytes()).unwrap();
-            socket.write(&[CR, LF]).unwrap();
-            socket.write(arg);
-            socket.write(&[CR, LF]).unwrap();
+            socket.write(&[DOLLAR])?;
+            socket.write(arg.len().to_string().as_bytes())?;
+            socket.write(&[CR, LF])?;
+            socket.write(arg)?;
+            socket.write(&[CR, LF])?;
         }
-        socket.flush();
+        socket.flush()
     }
 }
 
 impl RedisEventListener for StandaloneEventListener {
-    fn open(&mut self) {
-        self.connect();
+    fn open(&mut self) -> Result<(), Error> {
+        match self.connect() {
+            Ok(_) => Result::Ok(()),
+            Err(error) => Result::Err(error)
+        }
     }
 
     fn close(&self) {
@@ -88,9 +91,11 @@ mod tests {
     use crate::{new, RedisEventListener};
 
     #[test]
-    fn test() {
+    fn open() {
         let mut redis_listener = new("localhost", 6379, "123");
-        redis_listener.open();
+        if let Err(error) = redis_listener.open() {
+            panic!("couldn't connect to server: {}", error)
+        }
         redis_listener.close();
     }
 }
