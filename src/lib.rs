@@ -1,6 +1,9 @@
 use std::io::{BufWriter, Error, Write};
 use std::net::{Shutdown, TcpStream};
 use std::result::Result;
+use std::result::Result::Ok;
+
+use byteorder::ReadBytesExt;
 
 use crate::config::Config;
 use crate::constants::*;
@@ -20,7 +23,7 @@ pub struct StandaloneEventListener {
     port: i32,
     password: &'static str,
     config: Config,
-    socket: Option<BufWriter<TcpStream>>,
+    writer: Option<BufWriter<TcpStream>>,
 }
 
 impl StandaloneEventListener {
@@ -29,46 +32,82 @@ impl StandaloneEventListener {
         println!("connecting to {}", addr);
         let stream = TcpStream::connect(addr)?;
         println!("connected to server!");
-        self.socket = Option::Some(BufWriter::new(stream));
+        self.writer = Option::Some(BufWriter::new(stream));
+        Ok(())
+    }
 
+    fn auth(&mut self) -> Result<(), Error> {
         if !self.password.is_empty() {
             self.send("AUTH".as_bytes(), &[self.password.as_bytes()])?;
+            let resp = self.response()?;
+            if resp != b"OK" {
+                // TODO return error
+                let resp = String::from_utf8(resp).unwrap();
+                panic!("{} ", resp);
+            }
         }
-        Result::Ok(())
+        Ok(())
     }
 
     fn send(&mut self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
-        let socket = self.socket.as_mut().unwrap();
-        socket.write(&[STAR])?;
+        let writer = self.writer.as_mut().unwrap();
+        writer.write(&[STAR])?;
         let args_len = args.len() + 1;
-        socket.write(args_len.to_string().as_bytes())?;
-        socket.write(&[CR, LF, DOLLAR])?;
-        socket.write(command.len().to_string().as_bytes())?;
-        socket.write(&[CR, LF])?;
-        socket.write(command)?;
-        socket.write(&[CR, LF])?;
+        writer.write(args_len.to_string().as_bytes())?;
+        writer.write(&[CR, LF, DOLLAR])?;
+        writer.write(command.len().to_string().as_bytes())?;
+        writer.write(&[CR, LF])?;
+        writer.write(command)?;
+        writer.write(&[CR, LF])?;
         for arg in args {
-            socket.write(&[DOLLAR])?;
-            socket.write(arg.len().to_string().as_bytes())?;
-            socket.write(&[CR, LF])?;
-            socket.write(arg)?;
-            socket.write(&[CR, LF])?;
+            writer.write(&[DOLLAR])?;
+            writer.write(arg.len().to_string().as_bytes())?;
+            writer.write(&[CR, LF])?;
+            writer.write(arg)?;
+            writer.write(&[CR, LF])?;
         }
-        socket.flush()
+        writer.flush()
+    }
+
+    fn response(&mut self) -> Result<Vec<u8>, Error> {
+        let writer = self.writer.as_mut().unwrap();
+        let socket = writer.get_mut();
+        let byte = socket.read_u8()?;
+        match byte {
+            PLUS | MINUS => {
+                let mut bytes = vec![];
+                loop {
+                    let byte = socket.read_u8()?;
+                    if byte != CR {
+                        bytes.push(byte);
+                    } else {
+                        break;
+                    }
+                }
+                let byte = socket.read_u8()?;
+                if byte == LF {
+                    return Result::Ok(bytes);
+                } else {
+                    panic!("Expect LF after CR");
+                }
+            }
+            _ => {
+                Ok(Vec::default())
+            }
+        }
     }
 }
 
 impl RedisEventListener for StandaloneEventListener {
     fn open(&mut self) -> Result<(), Error> {
-        match self.connect() {
-            Ok(_) => Result::Ok(()),
-            Err(error) => Result::Err(error)
-        }
+        self.connect()?;
+        self.auth()?;
+        Ok(())
     }
 
     fn close(&self) {
-        let option = self.socket.as_ref();
-        if self.socket.is_some() {
+        let option = self.writer.as_ref();
+        if self.writer.is_some() {
             println!("close connection with server...");
             option.unwrap().get_ref().shutdown(Shutdown::Both).unwrap();
         }
@@ -81,7 +120,7 @@ pub fn new(host: &'static str, port: i32, password: &'static str) -> StandaloneE
         port,
         password,
         config: config::default(),
-        socket: Option::None,
+        writer: Option::None,
     }
 }
 
