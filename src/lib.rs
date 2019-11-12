@@ -23,6 +23,8 @@ pub struct StandaloneEventListener {
     password: &'static str,
     config: Config,
     stream: Option<TcpStream>,
+    id: &'static str,
+    offset: i64,
 }
 
 impl StandaloneEventListener {
@@ -38,6 +40,15 @@ impl StandaloneEventListener {
             self.send(b"AUTH", &[self.password.as_bytes()])?;
             self.response()?;
         }
+        Ok(())
+    }
+
+    fn send_port(&mut self) -> Result<(), Error> {
+        let stream = self.stream.as_ref().unwrap();
+        let port = stream.local_addr()?.port().to_string();
+        let port = port.as_bytes();
+        self.send(b"REPLCONF", &[b"listening-port", port]);
+        self.response()?;
         Ok(())
     }
 
@@ -110,7 +121,7 @@ impl StandaloneEventListener {
                         let end = &mut [0; 2];
                         socket.read_exact(end)?;
                         if end == b"\r\n" {
-                            return Ok(Vec::from(bytes));
+                            return Ok(bytes);
                         } else {
                             return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
                         }
@@ -137,11 +148,17 @@ impl RedisEventListener for StandaloneEventListener {
     fn open(&mut self) -> Result<(), Error> {
         self.connect()?;
         self.auth()?;
-        let stream = self.stream.as_ref().unwrap();
-        let port = stream.local_addr()?.port().to_string();
-        let port = port.as_bytes();
-        self.send(b"REPLCONF", &[b"listening-port", port]);
-        self.response()?;
+        self.send_port();
+
+        let offset = self.offset.to_string();
+        let replica_offset = offset.as_bytes();
+
+        self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset]);
+        let resp = self.response()?;
+        let resp = String::from_utf8(resp).unwrap();
+        panic!("resp: {}", resp);
+
+
         Ok(())
     }
 
@@ -160,6 +177,8 @@ pub fn new(addr: SocketAddr, password: &'static str) -> StandaloneEventListener 
         password,
         config: config::default(),
         stream: Option::None,
+        id: "?",
+        offset: -1,
     }
 }
 
