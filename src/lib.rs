@@ -142,6 +142,17 @@ impl StandaloneEventListener {
             }
         }
     }
+
+    fn new(addr: SocketAddr, password: &'static str) -> StandaloneEventListener {
+        StandaloneEventListener {
+            addr,
+            password,
+            config: config::default(),
+            stream: Option::None,
+            id: "?",
+            offset: -1,
+        }
+    }
 }
 
 impl RedisEventListener for StandaloneEventListener {
@@ -171,29 +182,18 @@ impl RedisEventListener for StandaloneEventListener {
     }
 }
 
-pub fn new(addr: SocketAddr, password: &'static str) -> StandaloneEventListener {
-    StandaloneEventListener {
-        addr,
-        password,
-        config: config::default(),
-        stream: Option::None,
-        id: "?",
-        offset: -1,
-    }
-}
-
 // 测试用例
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, SocketAddr};
     use std::str::FromStr;
 
-    use crate::{new, RedisEventListener};
+    use crate::{RedisEventListener, StandaloneEventListener};
 
     #[test]
     fn open() {
         let ip = IpAddr::from_str("127.0.0.1").unwrap();
-        let mut redis_listener = new(SocketAddr::new(ip, 6379), "123456");
+        let mut redis_listener = StandaloneEventListener::new(SocketAddr::new(ip, 6379), "123456");
         if let Err(error) = redis_listener.open() {
             panic!("couldn't connect to server: {}", error)
         }
