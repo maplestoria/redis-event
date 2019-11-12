@@ -1,4 +1,4 @@
-use std::io::{BufWriter, Error, Write};
+use std::io::{BufWriter, Error, ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::result::Result;
 use std::result::Result::Ok;
@@ -74,7 +74,7 @@ impl StandaloneEventListener {
         let socket = writer.get_mut();
         let byte = socket.read_u8()?;
         match byte {
-            PLUS | MINUS => {
+            PLUS | MINUS => { // Plus: Simple String; Minus: Error
                 let mut bytes = vec![];
                 loop {
                     let byte = socket.read_u8()?;
@@ -89,6 +89,44 @@ impl StandaloneEventListener {
                     return Result::Ok(bytes);
                 } else {
                     panic!("Expect LF after CR");
+                }
+            }
+            DOLLAR => { // Bulk String
+                let mut bytes = vec![];
+                loop {
+                    let byte = socket.read_u8()?;
+                    if byte != CR {
+                        bytes.push(byte);
+                    } else {
+                        break;
+                    }
+                }
+                let byte = socket.read_u8()?;
+                if byte == LF {
+                    let length = String::from_utf8(bytes).unwrap();
+                    let length = length.parse::<isize>().unwrap();
+                    if length > 0 {
+                        let mut bytes = vec![];
+                        for _ in 0..length {
+                            bytes.push(socket.read_u8()?);
+                        }
+                        let end = &mut [0; 2];
+                        socket.read_exact(end)?;
+                        if end == b"\r\n" {
+                            return Ok(Vec::from(bytes));
+                        } else {
+                            return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
+                        }
+                    } else if length == 0 {
+                        // length == 0 代表空字符，后面还有CRLF
+                        socket.read_exact(&mut [0; 2])?;
+                        return Ok(Vec::default());
+                    } else {
+                        // length < 0 代表null
+                        return Ok(Vec::default());
+                    }
+                } else {
+                    return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
                 }
             }
             _ => {
