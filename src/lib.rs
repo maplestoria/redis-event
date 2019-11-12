@@ -7,6 +7,7 @@ use byteorder::ReadBytesExt;
 
 use crate::config::Config;
 use crate::constants::*;
+use crate::Data::{Bytes, Empty};
 
 mod constants;
 mod config;
@@ -15,6 +16,12 @@ pub trait RedisEventListener {
     fn open(&mut self) -> Result<(), Error>;
 
     fn close(&self);
+}
+
+enum Data<B, V> {
+    Bytes(B),
+    BytesVec(V),
+    Empty,
 }
 
 // 用于监听Redis单点的事件
@@ -47,7 +54,7 @@ impl StandaloneEventListener {
         let stream = self.stream.as_ref().unwrap();
         let port = stream.local_addr()?.port().to_string();
         let port = port.as_bytes();
-        self.send(b"REPLCONF", &[b"listening-port", port]);
+        self.send(b"REPLCONF", &[b"listening-port", port])?;
         self.response()?;
         Ok(())
     }
@@ -73,7 +80,7 @@ impl StandaloneEventListener {
         writer.flush()
     }
 
-    fn response(&mut self) -> Result<Vec<u8>, Error> {
+    fn response(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
         let mut socket = self.stream.as_ref().unwrap();
         let response_type = socket.read_u8()?;
         match response_type {
@@ -90,7 +97,7 @@ impl StandaloneEventListener {
                 let byte = socket.read_u8()?;
                 if byte == LF {
                     if response_type == PLUS {
-                        return Ok(bytes);
+                        return Ok(Bytes(bytes));
                     } else {
                         let message = String::from_utf8(bytes).unwrap();
                         return Err(Error::new(ErrorKind::Other, message));
@@ -121,24 +128,24 @@ impl StandaloneEventListener {
                         let end = &mut [0; 2];
                         socket.read_exact(end)?;
                         if end == b"\r\n" {
-                            return Ok(bytes);
+                            return Ok(Bytes(bytes));
                         } else {
                             return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
                         }
                     } else if length == 0 {
                         // length == 0 代表空字符，后面还有CRLF
                         socket.read_exact(&mut [0; 2])?;
-                        return Ok(Vec::default());
+                        return Ok(Empty);
                     } else {
                         // length < 0 代表null
-                        return Ok(Vec::default());
+                        return Ok(Empty);
                     }
                 } else {
                     return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
                 }
             }
             _ => {
-                Ok(Vec::default())
+                Ok(Empty)
             }
         }
     }
@@ -159,17 +166,17 @@ impl RedisEventListener for StandaloneEventListener {
     fn open(&mut self) -> Result<(), Error> {
         self.connect()?;
         self.auth()?;
-        self.send_port();
+        self.send_port()?;
 
         let offset = self.offset.to_string();
         let replica_offset = offset.as_bytes();
 
-        self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset]);
-        let resp = self.response()?;
-        let resp = String::from_utf8(resp).unwrap();
-        panic!("resp: {}", resp);
-
-
+        self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset])?;
+        let data = self.response()?;
+        if let Bytes(resp) = data {
+            let resp = String::from_utf8(resp).unwrap();
+            panic!("resp: {}", resp);
+        }
         Ok(())
     }
 
@@ -193,7 +200,7 @@ mod tests {
     #[test]
     fn open() {
         let ip = IpAddr::from_str("127.0.0.1").unwrap();
-        let mut redis_listener = StandaloneEventListener::new(SocketAddr::new(ip, 6379), "123456");
+        let mut redis_listener = StandaloneEventListener::new(SocketAddr::new(ip, 6379), "123");
         if let Err(error) = redis_listener.open() {
             panic!("couldn't connect to server: {}", error)
         }
