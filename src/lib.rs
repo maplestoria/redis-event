@@ -39,12 +39,7 @@ impl StandaloneEventListener {
     fn auth(&mut self) -> Result<(), Error> {
         if !self.password.is_empty() {
             self.send("AUTH".as_bytes(), &[self.password.as_bytes()])?;
-            let resp = self.response()?;
-            if resp != b"OK" {
-                // TODO return error
-                let resp = String::from_utf8(resp).unwrap();
-                panic!("{} ", resp);
-            }
+            self.response()?;
         }
         Ok(())
     }
@@ -72,8 +67,8 @@ impl StandaloneEventListener {
     fn response(&mut self) -> Result<Vec<u8>, Error> {
         let writer = self.writer.as_mut().unwrap();
         let socket = writer.get_mut();
-        let byte = socket.read_u8()?;
-        match byte {
+        let response_type = socket.read_u8()?;
+        match response_type {
             PLUS | MINUS => { // Plus: Simple String; Minus: Error
                 let mut bytes = vec![];
                 loop {
@@ -86,9 +81,14 @@ impl StandaloneEventListener {
                 }
                 let byte = socket.read_u8()?;
                 if byte == LF {
-                    return Result::Ok(bytes);
+                    if response_type == PLUS {
+                        return Ok(bytes);
+                    } else {
+                        let message = String::from_utf8(bytes).unwrap();
+                        return Err(Error::new(ErrorKind::Other, message));
+                    }
                 } else {
-                    panic!("Expect LF after CR");
+                    return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
                 }
             }
             DOLLAR => { // Bulk String
