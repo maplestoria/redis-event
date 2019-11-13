@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::Data::{Bytes, BytesVec, Empty};
 
 mod config;
+mod lzf;
 
 pub trait RedisEventListener {
     fn open(&mut self) -> Result<(), Error>;
@@ -295,11 +296,27 @@ fn read_string(socket: &mut dyn Read) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Err
     let length = read_length(socket)?;
     if length.is_special {
         match length.val {
-            // TODO
-            0 => {}
-            1 => {}
-            2 => {}
-            3 => {}
+            0 => {
+                let int = socket.read_i8()?;
+                return Ok(Bytes(int.to_string().as_bytes().to_vec()));
+            }
+            1 => {
+                let int = read_integer(socket, 2, false)?;
+                return Ok(Bytes(int.to_string().as_bytes().to_vec()));
+            }
+            2 => {
+                let int = read_integer(socket, 4, false)?;
+                return Ok(Bytes(int.to_string().as_bytes().to_vec()));
+            }
+            3 => {
+                let length = read_length(socket)?;
+                let c_length = read_length(socket)?;
+                let mut compressed = vec![0; c_length.val as usize];
+                socket.read_exact(&mut compressed)?;
+                let mut origin = vec![0; length.val as usize];
+                lzf::decompress(&mut compressed, c_length.val, &mut origin, length.val);
+                return Ok(Bytes(origin));
+            }
             _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid string length"))
         };
     };
