@@ -18,12 +18,6 @@ pub trait RedisEventListener {
     fn close(&self);
 }
 
-enum Data<B, V> {
-    Bytes(B),
-    BytesVec(V),
-    Empty,
-}
-
 // 用于监听Redis单点的事件
 pub struct StandaloneEventListener {
     addr: SocketAddr,
@@ -45,7 +39,7 @@ impl StandaloneEventListener {
     fn auth(&mut self) -> Result<(), Error> {
         if !self.password.is_empty() {
             self.send(b"AUTH", &[self.password.as_bytes()])?;
-            self.response()?;
+            self.response(read_bytes)?;
         }
         Ok(())
     }
@@ -55,7 +49,7 @@ impl StandaloneEventListener {
         let port = stream.local_addr()?.port().to_string();
         let port = port.as_bytes();
         self.send(b"REPLCONF", &[b"listening-port", port])?;
-        self.response()?;
+        self.response(read_bytes)?;
         Ok(())
     }
 
@@ -80,7 +74,8 @@ impl StandaloneEventListener {
         writer.flush()
     }
 
-    fn response(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    fn response(&mut self, func: fn(&mut dyn Read, isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
+                -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
         let mut socket = self.stream.as_ref().unwrap();
         let response_type = socket.read_u8()?;
         match response_type {
@@ -120,26 +115,8 @@ impl StandaloneEventListener {
                 if byte == LF {
                     let length = String::from_utf8(bytes).unwrap();
                     let length = length.parse::<isize>().unwrap();
-                    if length > 0 {
-                        let mut bytes = vec![];
-                        for _ in 0..length {
-                            bytes.push(socket.read_u8()?);
-                        }
-                        let end = &mut [0; 2];
-                        socket.read_exact(end)?;
-                        if end == b"\r\n" {
-                            return Ok(Bytes(bytes));
-                        } else {
-                            return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
-                        }
-                    } else if length == 0 {
-                        // length == 0 代表空字符，后面还有CRLF
-                        socket.read_exact(&mut [0; 2])?;
-                        return Ok(Empty);
-                    } else {
-                        // length < 0 代表null
-                        return Ok(Empty);
-                    }
+                    let stream = self.stream.as_mut().unwrap();
+                    func(stream, length)
                 } else {
                     return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
                 }
@@ -171,11 +148,15 @@ impl RedisEventListener for StandaloneEventListener {
         let offset = self.offset.to_string();
         let replica_offset = offset.as_bytes();
 
-        self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset])?;
-        let data = self.response()?;
+        self.send(b"GET", &[b"test"])?;
+        let data = self.response(read_bytes)?;
         if let Bytes(resp) = data {
             let resp = String::from_utf8(resp).unwrap();
-            panic!("resp: {}", resp);
+//            if resp.starts_with("FULLRESYNC") {
+            panic!("{}", resp);
+//            }
+        } else {
+            return Err(Error::new(ErrorKind::Other, "Expect Redis string response"));
         }
         Ok(())
     }
@@ -189,6 +170,45 @@ impl RedisEventListener for StandaloneEventListener {
     }
 }
 
+// 用于包装redis的返回值
+enum Data<B, V> {
+    // 包装Vec<u8>
+    Bytes(B),
+    // 包装Vec<Vec<u8>>
+    BytesVec(V),
+    // 空返回
+    Empty,
+}
+
+// 读取指定length的字节, 并返回
+fn read_bytes(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    if length > 0 {
+        let mut bytes = vec![];
+        for _ in 0..length {
+            bytes.push(socket.read_u8()?);
+        }
+        let end = &mut [0; 2];
+        socket.read_exact(end)?;
+        if end == b"\r\n" {
+            return Ok(Bytes(bytes));
+        } else {
+            return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
+        }
+    } else if length == 0 {
+        // length == 0 代表空字符，后面还有CRLF
+        socket.read_exact(&mut [0; 2])?;
+        return Ok(Empty);
+    } else {
+        // length < 0 代表null
+        return Ok(Empty);
+    }
+}
+
+// 读取指定length的字节, 按照rdb的规则解析后再返回数据
+fn parse_rdb(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    Ok(Empty)
+}
+
 // 测试用例
 #[cfg(test)]
 mod tests {
@@ -200,7 +220,7 @@ mod tests {
     #[test]
     fn open() {
         let ip = IpAddr::from_str("127.0.0.1").unwrap();
-        let mut redis_listener = StandaloneEventListener::new(SocketAddr::new(ip, 6379), "123");
+        let mut redis_listener = StandaloneEventListener::new(SocketAddr::new(ip, 6379), "123456");
         if let Err(error) = redis_listener.open() {
             panic!("couldn't connect to server: {}", error)
         }
