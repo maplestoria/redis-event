@@ -273,7 +273,7 @@ fn read_bytes(socket: &mut dyn Read, length: isize, _: &mut Vec<Box<dyn EventLis
 
 // 读取、解析rdb
 fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
-    println!("rdb size: {}", length);
+    println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
     socket.read_exact(&mut bytes)?;
@@ -281,11 +281,38 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
     socket.read_exact(&mut bytes[..=3])?;
     let rdb_version = String::from_utf8(bytes[..=3].to_vec()).unwrap();
     let rdb_version = rdb_version.parse::<isize>().unwrap();
-    while let data_type = socket.read_u8()? {
+    loop {
+        let data_type = socket.read_u8()?;
         match data_type {
             AUX => {
-                read_string(socket)?;
-                read_string(socket)?;
+                if let Bytes(data) = read_string(socket)? {
+                    let data = String::from_utf8(data).unwrap();
+                    print!("{}: ", data);
+                }
+                if let Bytes(data) = read_string(socket)? {
+                    let data = String::from_utf8(data).unwrap();
+                    print!("{}\r\n", data);
+                }
+            }
+            DB_SELECTOR => {
+                let db = read_length(socket)?;
+                println!("db: {}", db.val);
+            }
+            DB_RESIZE => {
+                let db = read_length(socket)?;
+                println!("db total keys: {}", db.val);
+                let db = read_length(socket)?;
+                println!("db expired keys: {}", db.val);
+            }
+            STRING => {
+                if let Bytes(data) = read_string(socket)? {
+                    let data = String::from_utf8(data).unwrap();
+                    print!("{}: ", data);
+                }
+                if let Bytes(data) = read_string(socket)? {
+                    let data = String::from_utf8(data).unwrap();
+                    print!("{}\r\n", data);
+                }
             }
             EOF => {
                 if rdb_version >= 5 {
@@ -317,12 +344,12 @@ fn read_string(socket: &mut dyn Read) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Err
                 return Ok(Bytes(int.to_string().into_bytes().to_vec()));
             }
             3 => {
-                let length = read_length(socket)?;
-                let c_length = read_length(socket)?;
-                let mut compressed = vec![0; c_length.val as usize];
+                let compressed_len = read_length(socket)?;
+                let origin_len = read_length(socket)?;
+                let mut compressed = vec![0; compressed_len.val as usize];
                 socket.read_exact(&mut compressed)?;
-                let mut origin = vec![0; length.val as usize];
-                lzf::decompress(&mut compressed, c_length.val, &mut origin, length.val);
+                let mut origin = vec![0; origin_len.val as usize];
+                lzf::decompress(&mut compressed, compressed_len.val, &mut origin, origin_len.val);
                 return Ok(Bytes(origin));
             }
             _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid string length"))
@@ -409,6 +436,8 @@ const AUX: u8 = 0xFA;
 const DB_SELECTOR: u8 = 0xFE;
 //
 const DB_RESIZE: u8 = 0xFB;
+// 代表字符串的数据
+const STRING: u8 = 0;
 // end of file
 const EOF: u8 = 0xFF;
 

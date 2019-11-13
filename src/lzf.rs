@@ -1,5 +1,6 @@
 // lzf解压缩算法
-pub(crate) fn decompress(input: &mut Vec<u8>, input_len: isize, output: &mut Vec<u8>, output_len: isize) {
+pub(crate) fn decompress(input: &mut Vec<u8>, input_len: isize,
+                         output: &mut Vec<u8>, output_len: isize) {
     let mut iidx: isize = 0;
     let mut oidx: isize = 0;
     
