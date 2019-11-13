@@ -1,9 +1,9 @@
-use std::io::{BufWriter, Error, ErrorKind, Read, Write};
+use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use std::result::Result;
 use std::result::Result::Ok;
 
-use byteorder::ReadBytesExt;
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::config::Config;
 use crate::Data::{Bytes, BytesVec, Empty};
@@ -12,7 +12,7 @@ mod config;
 
 pub trait RedisEventListener {
     fn open(&mut self) -> Result<(), Error>;
-
+    
     fn close(&self);
 }
 
@@ -35,7 +35,7 @@ impl StandaloneEventListener {
         self.stream = Option::Some(stream);
         Ok(())
     }
-
+    
     fn auth(&mut self) -> Result<(), Error> {
         if !self.password.is_empty() {
             self.send(b"AUTH", &[self.password.as_bytes()])?;
@@ -43,7 +43,7 @@ impl StandaloneEventListener {
         }
         Ok(())
     }
-
+    
     fn send_port(&mut self) -> Result<(), Error> {
         let stream = self.stream.as_ref().unwrap();
         let port = stream.local_addr()?.port().to_string();
@@ -52,7 +52,7 @@ impl StandaloneEventListener {
         self.response(read_bytes)?;
         Ok(())
     }
-
+    
     fn send(&mut self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
         let stream = self.stream.as_ref().unwrap();
         let mut writer = BufWriter::new(stream);
@@ -73,7 +73,7 @@ impl StandaloneEventListener {
         }
         writer.flush()
     }
-
+    
     fn response(&mut self, func: fn(&mut dyn Read, isize, &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                 -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
         let mut socket = self.stream.as_ref().unwrap();
@@ -167,7 +167,7 @@ impl StandaloneEventListener {
         }
         Ok(Empty)
     }
-
+    
     fn new(addr: SocketAddr, password: &'static str) -> StandaloneEventListener {
         StandaloneEventListener {
             addr,
@@ -180,11 +180,11 @@ impl StandaloneEventListener {
             command_listener: Vec::new(),
         }
     }
-
+    
     fn add_rdb_listener(&mut self, listener: Box<dyn EventListener>) {
         self.rdb_listener.push(listener)
     }
-
+    
     fn add_command_listener(&mut self, listener: Box<dyn EventListener>) {
         self.command_listener.push(listener)
     }
@@ -195,10 +195,10 @@ impl RedisEventListener for StandaloneEventListener {
         self.connect()?;
         self.auth()?;
         self.send_port()?;
-
+        
         let offset = self.offset.to_string();
         let replica_offset = offset.as_bytes();
-
+        
         self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset])?;
         if let Bytes(resp) = self.response(read_bytes)? {
             let resp = String::from_utf8(resp).unwrap();
@@ -210,7 +210,7 @@ impl RedisEventListener for StandaloneEventListener {
         }
         Ok(())
     }
-
+    
     fn close(&self) {
         let option = self.stream.as_ref();
         if self.stream.is_some() {
@@ -275,18 +275,94 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
     println!("rdb size: {}", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
-    socket.read_exact(&mut bytes);
+    socket.read_exact(&mut bytes)?;
     // 4个字节: rdb版本
-    socket.read_exact(&mut bytes[..=3]);
+    socket.read_exact(&mut bytes[..=3])?;
     while let data_type = socket.read_u8()? {
         match data_type {
             AUX => {
-
+                read_string(socket)?;
+                read_string(socket)?;
             }
-            _ => {}
+            _ => break
         };
     };
     Ok(Empty)
+}
+
+// 读取一个string
+fn read_string(socket: &mut dyn Read) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    let length = read_length(socket)?;
+    if length.is_special {
+        match length.val {
+            // TODO
+            0 => {}
+            1 => {}
+            2 => {}
+            3 => {}
+            _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid string length"))
+        };
+    };
+    let mut buff = vec![0; length.val as usize];
+    socket.read_exact(&mut buff)?;
+    Ok(Bytes(buff))
+}
+
+struct Length {
+    val: isize,
+    is_special: bool,
+}
+
+// 读取redis响应中下一条数据的长度
+fn read_length(socket: &mut dyn Read) -> Result<Length, Error> {
+    let byte = socket.read_u8()?;
+    
+    let byte_and = byte & 0xFF;
+    
+    let _type = (byte & 0xC0) >> 6;
+    
+    let mut result = -1;
+    let mut is_special = false;
+    
+    if _type == 3 {
+        result = (byte & 0x3F) as isize;
+        is_special = true;
+    } else if _type == 0 {
+        result = (byte & 0x3F) as isize;
+    } else if _type == 1 {
+        let next_byte = socket.read_u8()?;
+        result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
+    } else if byte_and == 0x80 {
+        result = read_integer(socket, 4, true)?;
+    } else if byte_and == 0x81 {
+        result = read_integer(socket, 8, true)?;
+    };
+    Ok(Length { val: result, is_special })
+}
+
+fn read_integer(socket: &mut dyn Read, size: isize, is_big_endian: bool) -> Result<isize, Error> {
+    let mut buff = vec![0; size as usize];
+    socket.read_exact(&mut buff)?;
+    let mut cursor = Cursor::new(&buff);
+    
+    if is_big_endian {
+        if size == 2 {
+            return Ok(cursor.read_i16::<BigEndian>()? as isize);
+        } else if size == 4 {
+            return Ok(cursor.read_i32::<BigEndian>()? as isize);
+        } else if size == 8 {
+            return Ok(cursor.read_i64::<BigEndian>()? as isize);
+        };
+    } else {
+        if size == 2 {
+            return Ok(cursor.read_i16::<LittleEndian>()? as isize);
+        } else if size == 4 {
+            return Ok(cursor.read_i32::<LittleEndian>()? as isize);
+        } else if size == 8 {
+            return Ok(cursor.read_i64::<LittleEndian>()? as isize);
+        };
+    }
+    Err(Error::new(ErrorKind::InvalidData, "Invalid integer size"))
 }
 
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
@@ -316,9 +392,9 @@ const EOF: u8 = 0xFF;
 mod tests {
     use std::net::{IpAddr, SocketAddr};
     use std::str::FromStr;
-
+    
     use crate::{RedisEventListener, StandaloneEventListener};
-
+    
     #[test]
     fn open() {
         let ip = IpAddr::from_str("127.0.0.1").unwrap();
