@@ -96,10 +96,10 @@ impl StandaloneEventListener {
                         return Ok(Bytes(bytes));
                     } else {
                         let message = String::from_utf8(bytes).unwrap();
-                        return Err(Error::new(ErrorKind::Other, message));
+                        return Err(Error::new(ErrorKind::InvalidInput, message));
                     }
                 } else {
-                    return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
+                    return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
                 }
             }
             DOLLAR => { // Bulk String
@@ -119,7 +119,7 @@ impl StandaloneEventListener {
                     let stream = self.stream.as_mut().unwrap();
                     func(stream, length)
                 } else {
-                    return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
+                    return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
                 }
             }
             STAR => { // Array
@@ -141,8 +141,7 @@ impl StandaloneEventListener {
                     } else {
                         let mut result = vec![];
                         for _ in 0..length {
-                            let data = self.response(read_bytes)?;
-                            match data {
+                            match self.response(read_bytes)? {
                                 Bytes(resp) => {
                                     result.push(resp);
                                 }
@@ -150,14 +149,14 @@ impl StandaloneEventListener {
                                     result.append(&mut resp);
                                 }
                                 Empty => {
-                                    return Err(Error::new(ErrorKind::Other, "Expect Redis response, but got empty"));
+                                    return Err(Error::new(ErrorKind::InvalidData, "Expect Redis response, but got empty"));
                                 }
                             }
                         }
                         Ok(BytesVec(result))
                     }
                 } else {
-                    return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
+                    return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
                 }
             }
             _ => {
@@ -188,14 +187,13 @@ impl RedisEventListener for StandaloneEventListener {
         let replica_offset = offset.as_bytes();
 
         self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset])?;
-        let data = self.response(read_bytes)?;
-        if let Bytes(resp) = data {
+        if let Bytes(resp) = self.response(read_bytes)? {
             let resp = String::from_utf8(resp).unwrap();
             if resp.starts_with("FULLRESYNC") {
                 panic!("{}", resp);
             }
         } else {
-            return Err(Error::new(ErrorKind::Other, "Expect Redis string response"));
+            return Err(Error::new(ErrorKind::InvalidData, "Expect Redis string response"));
         }
         Ok(())
     }
