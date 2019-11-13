@@ -24,6 +24,8 @@ pub struct StandaloneEventListener {
     stream: Option<TcpStream>,
     id: &'static str,
     offset: i64,
+    rdb_listener: Vec<Box<dyn EventListener>>,
+    command_listener: Vec<Box<dyn EventListener>>,
 }
 
 impl StandaloneEventListener {
@@ -72,7 +74,7 @@ impl StandaloneEventListener {
         writer.flush()
     }
 
-    fn response(&mut self, func: fn(&mut dyn Read, isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
+    fn response(&mut self, func: fn(&mut dyn Read, isize, &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                 -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
         let mut socket = self.stream.as_ref().unwrap();
         let response_type = socket.read_u8()?;
@@ -117,7 +119,7 @@ impl StandaloneEventListener {
                     let length = String::from_utf8(bytes).unwrap();
                     let length = length.parse::<isize>().unwrap();
                     let stream = self.stream.as_mut().unwrap();
-                    func(stream, length)
+                    func(stream, length, &mut self.rdb_listener)
                 } else {
                     return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
                 }
@@ -173,7 +175,17 @@ impl StandaloneEventListener {
             stream: Option::None,
             id: "?",
             offset: -1,
+            rdb_listener: Vec::new(),
+            command_listener: Vec::new(),
         }
+    }
+
+    fn add_rdb_listener(&mut self, listener: Box<dyn EventListener>) {
+        self.rdb_listener.push(listener)
+    }
+
+    fn add_command_listener(&mut self, listener: Box<dyn EventListener>) {
+        self.command_listener.push(listener)
     }
 }
 
@@ -217,8 +229,24 @@ enum Data<B, V> {
     Empty,
 }
 
+// redis事件
+pub trait Event {}
+
+// redis key-value
+struct KeyValue {
+    key: Vec<u8>,
+    value: Vec<u8>,
+}
+
+impl Event for KeyValue {}
+
+// 监听redis事件
+pub trait EventListener {
+    fn handle(&mut self, e: &dyn Event);
+}
+
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-fn read_bytes(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+fn read_bytes(socket: &mut dyn Read, length: isize, _: &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![];
         for _ in 0..length {
@@ -241,8 +269,8 @@ fn read_bytes(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<
     }
 }
 
-// 读取指定length的字节, 按照rdb的规则解析后再返回数据
-fn parse_rdb(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+// 读取指定length的字节, 按照rdb的规则解析
+fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     Ok(Empty)
 }
 
