@@ -6,7 +6,7 @@ use std::result::Result::Ok;
 use byteorder::ReadBytesExt;
 
 use crate::config::Config;
-use crate::Data::{Bytes, Empty};
+use crate::Data::{Bytes, BytesVec, Empty};
 
 mod config;
 
@@ -123,7 +123,42 @@ impl StandaloneEventListener {
                 }
             }
             STAR => { // Array
-                Ok(Empty)
+                let mut bytes = vec![];
+                loop {
+                    let byte = socket.read_u8()?;
+                    if byte != CR {
+                        bytes.push(byte);
+                    } else {
+                        break;
+                    }
+                }
+                let byte = socket.read_u8()?;
+                if byte == LF {
+                    let length = String::from_utf8(bytes).unwrap();
+                    let length = length.parse::<isize>().unwrap();
+                    if length <= 0 {
+                        return Ok(Empty);
+                    } else {
+                        let mut result = vec![];
+                        for _ in 0..length {
+                            let data = self.response(read_bytes)?;
+                            match data {
+                                Bytes(resp) => {
+                                    result.push(resp);
+                                }
+                                BytesVec(mut resp) => {
+                                    result.append(&mut resp);
+                                }
+                                Empty => {
+                                    return Err(Error::new(ErrorKind::Other, "Expect Redis response, but got empty"));
+                                }
+                            }
+                        }
+                        Ok(BytesVec(result))
+                    }
+                } else {
+                    return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
+                }
             }
             _ => {
                 Ok(Empty)
@@ -213,7 +248,6 @@ fn parse_rdb(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<V
     Ok(Empty)
 }
 
-// 以下是redis响应中的常量字符
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 const CR: u8 = b'\r';
 const LF: u8 = b'\n';
