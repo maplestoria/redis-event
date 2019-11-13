@@ -59,15 +59,15 @@ impl StandaloneEventListener {
         let mut writer = BufWriter::new(stream);
         writer.write(&[STAR])?;
         let args_len = args.len() + 1;
-        writer.write(args_len.to_string().as_bytes())?;
+        writer.write(&args_len.to_string().into_bytes())?;
         writer.write(&[CR, LF, DOLLAR])?;
-        writer.write(command.len().to_string().as_bytes())?;
+        writer.write(&command.len().to_string().into_bytes())?;
         writer.write(&[CR, LF])?;
         writer.write(command)?;
         writer.write(&[CR, LF])?;
         for arg in args {
             writer.write(&[DOLLAR])?;
-            writer.write(arg.len().to_string().as_bytes())?;
+            writer.write(&arg.len().to_string().into_bytes())?;
             writer.write(&[CR, LF])?;
             writer.write(arg)?;
             writer.write(&[CR, LF])?;
@@ -279,11 +279,19 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
     socket.read_exact(&mut bytes)?;
     // 4个字节: rdb版本
     socket.read_exact(&mut bytes[..=3])?;
+    let rdb_version = String::from_utf8(bytes[..=3].to_vec()).unwrap();
+    let rdb_version = rdb_version.parse::<isize>().unwrap();
     while let data_type = socket.read_u8()? {
         match data_type {
             AUX => {
                 read_string(socket)?;
                 read_string(socket)?;
+            }
+            EOF => {
+                if rdb_version >= 5 {
+                    read_integer(socket, 8, true)?;
+                }
+                break;
             }
             _ => break
         };
@@ -298,15 +306,15 @@ fn read_string(socket: &mut dyn Read) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Err
         match length.val {
             0 => {
                 let int = socket.read_i8()?;
-                return Ok(Bytes(int.to_string().as_bytes().to_vec()));
+                return Ok(Bytes(int.to_string().into_bytes().to_vec()));
             }
             1 => {
                 let int = read_integer(socket, 2, false)?;
-                return Ok(Bytes(int.to_string().as_bytes().to_vec()));
+                return Ok(Bytes(int.to_string().into_bytes().to_vec()));
             }
             2 => {
                 let int = read_integer(socket, 4, false)?;
-                return Ok(Bytes(int.to_string().as_bytes().to_vec()));
+                return Ok(Bytes(int.to_string().into_bytes().to_vec()));
             }
             3 => {
                 let length = read_length(socket)?;
