@@ -6,10 +6,8 @@ use std::result::Result::Ok;
 use byteorder::ReadBytesExt;
 
 use crate::config::Config;
-use crate::constants::*;
 use crate::Data::{Bytes, Empty};
 
-mod constants;
 mod config;
 
 pub trait RedisEventListener {
@@ -79,7 +77,10 @@ impl StandaloneEventListener {
         let mut socket = self.stream.as_ref().unwrap();
         let response_type = socket.read_u8()?;
         match response_type {
-            PLUS | MINUS => { // Plus: Simple String; Minus: Error
+            // Plus: Simple String
+            // Minus: Error
+            // Colon: Integer
+            PLUS | MINUS | COLON => {
                 let mut bytes = vec![];
                 loop {
                     let byte = socket.read_u8()?;
@@ -91,7 +92,7 @@ impl StandaloneEventListener {
                 }
                 let byte = socket.read_u8()?;
                 if byte == LF {
-                    if response_type == PLUS {
+                    if response_type == PLUS || response_type == COLON {
                         return Ok(Bytes(bytes));
                     } else {
                         let message = String::from_utf8(bytes).unwrap();
@@ -121,6 +122,9 @@ impl StandaloneEventListener {
                     return Err(Error::new(ErrorKind::Other, "Expect LF after CR"));
                 }
             }
+            STAR => { // Array
+                Ok(Empty)
+            }
             _ => {
                 Ok(Empty)
             }
@@ -148,13 +152,13 @@ impl RedisEventListener for StandaloneEventListener {
         let offset = self.offset.to_string();
         let replica_offset = offset.as_bytes();
 
-        self.send(b"GET", &[b"test"])?;
+        self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset])?;
         let data = self.response(read_bytes)?;
         if let Bytes(resp) = data {
             let resp = String::from_utf8(resp).unwrap();
-//            if resp.starts_with("FULLRESYNC") {
-            panic!("{}", resp);
-//            }
+            if resp.starts_with("FULLRESYNC") {
+                panic!("{}", resp);
+            }
         } else {
             return Err(Error::new(ErrorKind::Other, "Expect Redis string response"));
         }
@@ -180,7 +184,7 @@ enum Data<B, V> {
     Empty,
 }
 
-// 读取指定length的字节, 并返回
+// 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
 fn read_bytes(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![];
@@ -208,6 +212,21 @@ fn read_bytes(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<
 fn parse_rdb(socket: &mut dyn Read, length: isize) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     Ok(Empty)
 }
+
+// 以下是redis响应中的常量字符
+// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
+const CR: u8 = b'\r';
+const LF: u8 = b'\n';
+// 代表array响应
+const STAR: u8 = b'*';
+// 代表bulk string响应
+const DOLLAR: u8 = b'$';
+// 代表simple string响应
+const PLUS: u8 = b'+';
+// 代表error响应
+const MINUS: u8 = b'-';
+// 代表integer响应
+const COLON: u8 = b':';
 
 // 测试用例
 #[cfg(test)]
