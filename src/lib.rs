@@ -78,93 +78,91 @@ impl StandaloneEventListener {
     fn response(&mut self, func: fn(&mut dyn Read, isize, &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                 -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
         let mut socket = self.stream.as_ref().unwrap();
-        loop {
-            let response_type = socket.read_u8()?;
-            match response_type {
-                // Plus: Simple String
-                // Minus: Error
-                // Colon: Integer
-                PLUS | MINUS | COLON => {
-                    let mut bytes = vec![];
-                    loop {
-                        let byte = socket.read_u8()?;
-                        if byte != CR {
-                            bytes.push(byte);
-                        } else {
-                            break;
-                        }
-                    }
+        let response_type = socket.read_u8()?;
+        match response_type {
+            // Plus: Simple String
+            // Minus: Error
+            // Colon: Integer
+            PLUS | MINUS | COLON => {
+                let mut bytes = vec![];
+                loop {
                     let byte = socket.read_u8()?;
-                    if byte == LF {
-                        if response_type == PLUS || response_type == COLON {
-                            return Ok(Bytes(bytes));
-                        } else {
-                            let message = String::from_utf8(bytes).unwrap();
-                            return Err(Error::new(ErrorKind::InvalidInput, message));
-                        }
+                    if byte != CR {
+                        bytes.push(byte);
                     } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                        break;
                     }
                 }
-                DOLLAR => { // Bulk String
-                    let mut bytes = vec![];
-                    loop {
-                        let byte = socket.read_u8()?;
-                        if byte != CR {
-                            bytes.push(byte);
-                        } else {
-                            break;
-                        }
-                    }
-                    let byte = socket.read_u8()?;
-                    if byte == LF {
-                        let length = String::from_utf8(bytes).unwrap();
-                        let length = length.parse::<isize>().unwrap();
-                        let stream = self.stream.as_mut().unwrap();
-                        return func(stream, length, &mut self.rdb_listener);
+                let byte = socket.read_u8()?;
+                if byte == LF {
+                    if response_type == PLUS || response_type == COLON {
+                        return Ok(Bytes(bytes));
                     } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                        let message = String::from_utf8(bytes).unwrap();
+                        return Err(Error::new(ErrorKind::InvalidInput, message));
+                    }
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                }
+            }
+            DOLLAR => { // Bulk String
+                let mut bytes = vec![];
+                loop {
+                    let byte = socket.read_u8()?;
+                    if byte != CR {
+                        bytes.push(byte);
+                    } else {
+                        break;
                     }
                 }
-                STAR => { // Array
-                    let mut bytes = vec![];
-                    loop {
-                        let byte = socket.read_u8()?;
-                        if byte != CR {
-                            bytes.push(byte);
-                        } else {
-                            break;
-                        }
-                    }
+                let byte = socket.read_u8()?;
+                if byte == LF {
+                    let length = String::from_utf8(bytes).unwrap();
+                    let length = length.parse::<isize>().unwrap();
+                    let stream = self.stream.as_mut().unwrap();
+                    return func(stream, length, &mut self.rdb_listener);
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                }
+            }
+            STAR => { // Array
+                let mut bytes = vec![];
+                loop {
                     let byte = socket.read_u8()?;
-                    if byte == LF {
-                        let length = String::from_utf8(bytes).unwrap();
-                        let length = length.parse::<isize>().unwrap();
-                        if length <= 0 {
-                            return Ok(Empty);
-                        } else {
-                            let mut result = vec![];
-                            for _ in 0..length {
-                                match self.response(read_bytes)? {
-                                    Bytes(resp) => {
-                                        result.push(resp);
-                                    }
-                                    BytesVec(mut resp) => {
-                                        result.append(&mut resp);
-                                    }
-                                    Empty => {
-                                        return Err(Error::new(ErrorKind::InvalidData, "Expect Redis response, but got empty"));
-                                    }
+                    if byte != CR {
+                        bytes.push(byte);
+                    } else {
+                        break;
+                    }
+                }
+                let byte = socket.read_u8()?;
+                if byte == LF {
+                    let length = String::from_utf8(bytes).unwrap();
+                    let length = length.parse::<isize>().unwrap();
+                    if length <= 0 {
+                        return Ok(Empty);
+                    } else {
+                        let mut result = vec![];
+                        for _ in 0..length {
+                            match self.response(read_bytes)? {
+                                Bytes(resp) => {
+                                    result.push(resp);
+                                }
+                                BytesVec(mut resp) => {
+                                    result.append(&mut resp);
+                                }
+                                Empty => {
+                                    return Err(Error::new(ErrorKind::InvalidData, "Expect Redis response, but got empty"));
                                 }
                             }
-                            return Ok(BytesVec(result));
                         }
-                    } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                        return Ok(BytesVec(result));
                     }
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
                 }
-                _ => break
             }
+            _ => {}
         }
         Ok(Empty)
     }
@@ -348,6 +346,40 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                     length -= 2;
                 }
             }
+            LIST_QUICK_LIST => {
+                let key;
+                if let Bytes(data) = read_string(socket)? {
+                    key = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                }
+                let mut count: Length;
+                if let data = read_length(socket)? {
+                    count = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid length data"));
+                }
+                let mut args: Vec<Vec<u8>> = vec![];
+                args.insert(0, key);
+                
+                let mut index = 0;
+                while index < count.val {
+                    if let Bytes(data) = read_string(socket)? {
+                        let cursor = &mut Cursor::new(&data);
+                        // 跳过ZL_BYTES和ZL_TAIL
+                        cursor.set_position(8);
+                        let mut length = cursor.read_u16::<LittleEndian>()? as usize;
+                        while length > 0 {
+                            let list_item = read_zip_list_entry(cursor)?;
+                            args.push(list_item);
+                            length -= 1;
+                        }
+                    } else {
+                        return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                    }
+                    index += 1;
+                }
+            }
             EOF => {
                 if rdb_version >= 5 {
                     read_integer(socket, 8, true)?;
@@ -528,6 +560,7 @@ const DB_RESIZE: u8 = 0xFB;
 // 代表字符串的数据
 const STRING: u8 = 0;
 const HASH_ZIP_LIST: u8 = 13;
+const LIST_QUICK_LIST: u8 = 14;
 // end of file
 const EOF: u8 = 0xFF;
 const ZIP_INT_8BIT: u8 = 0xFE;
