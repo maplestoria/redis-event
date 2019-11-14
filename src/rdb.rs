@@ -2,8 +2,8 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{Data, EventListener, lzf};
-use crate::Data::Empty;
+use crate::{EventHandler, lzf};
+use crate::rdb::Data::{Bytes, Empty};
 
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 pub(crate) const CR: u8 = b'\r';
@@ -40,10 +40,20 @@ const ZIP_INT_24BIT: u8 = 0xF0;
 const ZIP_INT_32BIT: u8 = 0xD0;
 const ZIP_INT_64BIT: u8 = 0xE0;
 
+// 用于包装redis的返回值
+pub(crate) enum Data<B, V> {
+    // 包装Vec<u8>
+    Bytes(B),
+    // 包装Vec<Vec<u8>>
+    BytesVec(V),
+    // 空返回
+    Empty,
+}
+
 // 读取、解析rdb
 pub(crate) fn parse(socket: &mut dyn Read,
                     length: isize,
-                    rdb_listeners: &mut Vec<Box<dyn EventListener>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+                    rdb_listeners: &mut Vec<Box<dyn EventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -135,6 +145,30 @@ pub(crate) fn parse(socket: &mut dyn Read,
         };
     };
     Ok(Empty)
+}
+
+// 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
+pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &mut Vec<Box<dyn EventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    if length > 0 {
+        let mut bytes = vec![];
+        for _ in 0..length {
+            bytes.push(socket.read_u8()?);
+        }
+        let end = &mut [0; 2];
+        socket.read_exact(end)?;
+        if end == b"\r\n" {
+            return Ok(Bytes(bytes));
+        } else {
+            return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
+        }
+    } else if length == 0 {
+        // length == 0 代表空字符，后面还有CRLF
+        socket.read_exact(&mut [0; 2])?;
+        return Ok(Empty);
+    } else {
+        // length < 0 代表null
+        return Ok(Empty);
+    }
 }
 
 // 读取一个string
