@@ -292,11 +292,11 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                     print!("{}\r\n", data);
                 }
             }
-            DB_SELECTOR => {
+            SELECT_DB => {
                 let db = read_length(socket)?;
                 println!("db: {}", db.val);
             }
-            DB_RESIZE => {
+            DB_SIZE => {
                 let db = read_length(socket)?;
                 println!("db total keys: {}", db.val);
                 let db = read_length(socket)?;
@@ -316,14 +316,14 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                     return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                 }
             }
-            HASH_ZIP_LIST => {
+            HASH_ZIP_LIST | ZSET_ZIP_LIST => {
                 let key;
                 if let Bytes(data) = read_string(socket)? {
                     key = data;
                 } else {
                     return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                 }
-                let mut bytes = vec![];
+                let bytes;
                 if let Bytes(data) = read_string(socket)? {
                     bytes = data;
                 } else {
@@ -333,15 +333,15 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
                 let mut length = cursor.read_u16::<LittleEndian>()? as usize;
-                let mut args: Vec<Vec<u8>> = vec![];
-                args.insert(0, key);
+                let mut args: Vec<Vec<u8>> = Vec::with_capacity(length + 1);
+                args[0] = key;
                 
                 let mut index = 1;
                 while length > 0 {
                     let field_name = read_zip_list_entry(cursor)?;
                     let field_val = read_zip_list_entry(cursor)?;
-                    args.insert(index, field_name);
-                    args.insert(index + 1, field_val);
+                    args[index] = field_name;
+                    args[index + 1] = field_val;
                     index += 2;
                     length -= 2;
                 }
@@ -353,12 +353,7 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 } else {
                     return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                 }
-                let mut count: Length;
-                if let data = read_length(socket)? {
-                    count = data;
-                } else {
-                    return Err(Error::new(ErrorKind::InvalidData, "Invalid length data"));
-                }
+                let count = read_length(socket)?;
                 let mut args: Vec<Vec<u8>> = vec![];
                 args.insert(0, key);
                 
@@ -374,6 +369,26 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                             args.push(list_item);
                             length -= 1;
                         }
+                    } else {
+                        return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                    }
+                    index += 1;
+                }
+            }
+            LIST | SET => {
+                let key;
+                if let Bytes(data) = read_string(socket)? {
+                    key = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                }
+                let count = read_length(socket)?;
+                let mut args: Vec<Vec<u8>> = Vec::with_capacity((count.val as usize) + 1);
+                args[0] = key;
+                let mut index = 1;
+                while index < count.val {
+                    if let Bytes(data) = read_string(socket)? {
+                        args.push(data);
                     } else {
                         return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                     }
@@ -553,12 +568,15 @@ const MINUS: u8 = b'-';
 const COLON: u8 = b':';
 // 代表 aux field
 const AUX: u8 = 0xFA;
-//
-const DB_SELECTOR: u8 = 0xFE;
-//
-const DB_RESIZE: u8 = 0xFB;
+// 当前redis db
+const SELECT_DB: u8 = 0xFE;
+// db的key数量
+const DB_SIZE: u8 = 0xFB;
 // 代表字符串的数据
 const STRING: u8 = 0;
+const LIST: u8 = 1;
+const SET: u8 = 2;
+const ZSET_ZIP_LIST: u8 = 12;
 const HASH_ZIP_LIST: u8 = 13;
 const LIST_QUICK_LIST: u8 = 14;
 // end of file
