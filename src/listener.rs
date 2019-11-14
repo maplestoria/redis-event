@@ -8,7 +8,7 @@ pub mod standalone {
     
     use crate::{config, EventHandler, rdb, RedisListener};
     use crate::config::Config;
-    use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, read_bytes, STAR};
+    use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
     
     // 用于监听单个Redis实例的事件
@@ -138,7 +138,7 @@ pub mod standalone {
                         } else {
                             let mut result = vec![];
                             for _ in 0..length {
-                                match self.response(read_bytes)? {
+                                match self.response(rdb::read_bytes)? {
                                     Bytes(resp) => {
                                         result.push(resp);
                                     }
@@ -180,7 +180,7 @@ pub mod standalone {
             let replica_offset = offset.as_bytes();
             
             self.send(b"PSYNC", &[self.id.as_bytes(), replica_offset])?;
-            if let Bytes(resp) = self.response(read_bytes)? {
+            if let Bytes(resp) = self.response(rdb::read_bytes)? {
                 let resp = String::from_utf8(resp).unwrap();
                 if resp.starts_with("FULLRESYNC") {
                     self.response(rdb::parse)?;
