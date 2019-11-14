@@ -305,8 +305,8 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 println!("db expired keys: {}", db.val);
             }
             STRING => {
-                let mut key;
-                let mut value;
+                let key;
+                let value;
                 if let Bytes(data) = read_string(socket)? {
                     key = data;
                 } else {
@@ -319,7 +319,7 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 }
             }
             HASH_ZIP_LIST => {
-                let mut key;
+                let key;
                 if let Bytes(data) = read_string(socket)? {
                     key = data;
                 } else {
@@ -336,14 +336,14 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 cursor.set_position(8);
                 let mut length = cursor.read_u16::<LittleEndian>()? as usize;
                 let mut args: Vec<Vec<u8>> = vec![];
-                args[0] = key;
+                args.insert(0, key);
                 
                 let mut index = 1;
                 while length > 0 {
                     let field_name = read_zip_list_entry(cursor)?;
                     let field_val = read_zip_list_entry(cursor)?;
-                    args[index] = field_name;
-                    args[index + 1] = field_val;
+                    args.insert(index, field_name);
+                    args.insert(index + 1, field_val);
                     index += 2;
                     length -= 2;
                 }
@@ -452,9 +452,8 @@ fn read_integer(socket: &mut dyn Read, size: isize, is_big_endian: bool) -> Resu
 }
 
 fn read_zip_list_entry(cursor: &mut Cursor<&Vec<u8>>) -> Result<Vec<u8>, Error> {
-    let mut prev_len = cursor.read_u8()? as u32;
-    if prev_len >= 254 {
-        prev_len = cursor.read_u32::<LittleEndian>()?
+    if cursor.read_u8()? >= 254 {
+        cursor.read_u32::<LittleEndian>()?;
     }
     let flag = cursor.read_u8()?;
     match flag >> 6 {
