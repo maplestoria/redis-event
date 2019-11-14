@@ -332,18 +332,16 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 let cursor = &mut Cursor::new(&bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
-                let mut length = cursor.read_u16::<LittleEndian>()? as usize;
-                let mut args: Vec<Vec<u8>> = Vec::with_capacity(length + 1);
-                args[0] = key;
+                let mut count = cursor.read_u16::<LittleEndian>()? as usize;
+                let mut args: Vec<Vec<u8>> = Vec::with_capacity(count + 1);
+                args.push(key);
                 
-                let mut index = 1;
-                while length > 0 {
+                while count > 0 {
                     let field_name = read_zip_list_entry(cursor)?;
                     let field_val = read_zip_list_entry(cursor)?;
-                    args[index] = field_name;
-                    args[index + 1] = field_val;
-                    index += 2;
-                    length -= 2;
+                    args.push(field_name);
+                    args.push(field_val);
+                    count -= 2;
                 }
             }
             LIST_QUICK_LIST => {
@@ -363,11 +361,11 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                         let cursor = &mut Cursor::new(&data);
                         // 跳过ZL_BYTES和ZL_TAIL
                         cursor.set_position(8);
-                        let mut length = cursor.read_u16::<LittleEndian>()? as usize;
-                        while length > 0 {
+                        let mut count = cursor.read_u16::<LittleEndian>()? as usize;
+                        while count > 0 {
                             let list_item = read_zip_list_entry(cursor)?;
                             args.push(list_item);
-                            length -= 1;
+                            count -= 1;
                         }
                     } else {
                         return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
@@ -382,17 +380,16 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 } else {
                     return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                 }
-                let count = read_length(socket)?;
+                let mut count = read_length(socket)?;
                 let mut args: Vec<Vec<u8>> = Vec::with_capacity((count.val as usize) + 1);
-                args[0] = key;
-                let mut index = 1;
-                while index < count.val {
+                args.push(key);
+                while count.val > 0 {
                     if let Bytes(data) = read_string(socket)? {
                         args.push(data);
                     } else {
                         return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                     }
-                    index += 1;
+                    count.val -= 1;
                 }
             }
             EOF => {
