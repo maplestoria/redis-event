@@ -305,13 +305,47 @@ fn parse_rdb(socket: &mut dyn Read, length: isize, rdb_listeners: &mut Vec<Box<d
                 println!("db expired keys: {}", db.val);
             }
             STRING => {
+                let mut key;
+                let mut value;
                 if let Bytes(data) = read_string(socket)? {
-                    let data = String::from_utf8(data).unwrap();
-                    print!("{}: ", data);
+                    key = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
                 }
                 if let Bytes(data) = read_string(socket)? {
-                    let data = String::from_utf8(data).unwrap();
-                    print!("{}\r\n", data);
+                    value = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                }
+            }
+            HASH_ZIP_LIST => {
+                let mut key;
+                if let Bytes(data) = read_string(socket)? {
+                    key = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                }
+                let mut bytes = vec![];
+                if let Bytes(data) = read_string(socket)? {
+                    bytes = data;
+                } else {
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid string data"));
+                }
+                let cursor = &mut Cursor::new(&bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let mut length = cursor.read_u16::<LittleEndian>()? as usize;
+                let mut args: Vec<Vec<u8>> = vec![];
+                args[0] = key;
+                
+                let mut index = 1;
+                while length > 0 {
+                    let field_name = read_zip_list_entry(cursor)?;
+                    let field_val = read_zip_list_entry(cursor)?;
+                    args[index] = field_name;
+                    args[index + 1] = field_val;
+                    index += 2;
+                    length -= 2;
                 }
             }
             EOF => {
@@ -417,6 +451,62 @@ fn read_integer(socket: &mut dyn Read, size: isize, is_big_endian: bool) -> Resu
     Err(Error::new(ErrorKind::InvalidData, "Invalid integer size"))
 }
 
+fn read_zip_list_entry(cursor: &mut Cursor<&Vec<u8>>) -> Result<Vec<u8>, Error> {
+    let mut prev_len = cursor.read_u8()? as u32;
+    if prev_len >= 254 {
+        prev_len = cursor.read_u32::<LittleEndian>()?
+    }
+    let flag = cursor.read_u8()?;
+    match flag >> 6 {
+        0 => {
+            let length = flag & 0x3F;
+            let mut buff = vec![0; length as usize];
+            cursor.read_exact(&mut buff)?;
+            return Ok(buff);
+        }
+        1 => {
+            let next_byte = cursor.read_u8()?;
+            let length = (((flag as u16) & 0x3F) << 8) | (next_byte as u16);
+            let mut buff = vec![0; length as usize];
+            cursor.read_exact(&mut buff)?;
+            return Ok(buff);
+        }
+        2 => {
+            let length = cursor.read_u32::<BigEndian>()?;
+            let mut buff = vec![0; length as usize];
+            cursor.read_exact(&mut buff)?;
+            return Ok(buff);
+        }
+        _ => {}
+    }
+    match flag {
+        ZIP_INT_8BIT => {
+            let int = cursor.read_i8()?;
+            return Ok(int.to_string().into_bytes());
+        }
+        ZIP_INT_16BIT => {
+            let int = cursor.read_i16::<LittleEndian>()?;
+            return Ok(int.to_string().into_bytes());
+        }
+        ZIP_INT_24BIT => {
+            let int = cursor.read_i24::<LittleEndian>()?;
+            return Ok(int.to_string().into_bytes());
+        }
+        ZIP_INT_32BIT => {
+            let int = cursor.read_i32::<LittleEndian>()?;
+            return Ok(int.to_string().into_bytes());
+        }
+        ZIP_INT_64BIT => {
+            let int = cursor.read_i64::<LittleEndian>()?;
+            return Ok(int.to_string().into_bytes());
+        }
+        _ => {
+            let result = (flag - 0xF1) as isize;
+            return Ok(result.to_string().into_bytes());
+        }
+    }
+}
+
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 const CR: u8 = b'\r';
 const LF: u8 = b'\n';
@@ -438,9 +528,16 @@ const DB_SELECTOR: u8 = 0xFE;
 const DB_RESIZE: u8 = 0xFB;
 // 代表字符串的数据
 const STRING: u8 = 0;
+const HASH_ZIP_LIST: u8 = 13;
 // end of file
 const EOF: u8 = 0xFF;
+const ZIP_INT_8BIT: u8 = 0xFE;
+const ZIP_INT_16BIT: u8 = 0xC0;
+const ZIP_INT_24BIT: u8 = 0xF0;
+const ZIP_INT_32BIT: u8 = 0xD0;
+const ZIP_INT_64BIT: u8 = 0xE0;
 
+// 11100000
 // 测试用例
 #[cfg(test)]
 mod tests {
