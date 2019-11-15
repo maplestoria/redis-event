@@ -21,7 +21,7 @@ pub trait RedisListener {
 
 // 定义redis rdb事件的处理接口
 pub trait RdbEventHandler {
-    fn handle(&self, e: &KeyValues);
+    fn handle(&self, key: &Vec<u8>, values: &Vec<Vec<u8>>, obj_type: u8);
 }
 
 // 定义redis命令的处理接口
@@ -32,11 +32,9 @@ pub trait CommandHandler {
 pub struct EchoRdbHandler {}
 
 impl RdbEventHandler for EchoRdbHandler {
-    fn handle(&self, e: &KeyValues) {
-        let key = e.key;
-        print!("[{:?}] {}: ", e.data_type, String::from_utf8(key.to_vec()).unwrap());
-        let val = e.values;
-        for x in val {
+    fn handle(&self, key: &Vec<u8>, values: &Vec<Vec<u8>>, obj_type: u8) {
+        print!("[{:?}] {}: ", obj_type, String::from_utf8(key.to_vec()).unwrap());
+        for x in values {
             print!("{} ", String::from_utf8((x).to_vec()).unwrap());
         }
         println!();
@@ -45,18 +43,11 @@ impl RdbEventHandler for EchoRdbHandler {
 
 pub struct Command {}
 
-pub struct KeyValues<'a> {
-    key: &'a Vec<u8>,
-    values: &'a Vec<Vec<u8>>,
-    data_type: &'a DataType,
-}
-
-#[derive(Debug)]
-pub enum DataType {
-    String,
-    List,
-    Set,
-    SortedSet,
-    Hash,
-    Stream,
-}
+/// Data types
+pub const OBJ_STRING: u8 = 0;    /* String object. */
+pub const OBJ_LIST: u8 = 1;      /* List object. */
+pub const OBJ_SET: u8 = 2;       /* Set object. */
+pub const OBJ_ZSET: u8 = 3;      /* Sorted set object. */
+pub const OBJ_HASH: u8 = 4;      /* Hash object. */
+pub const OBJ_MODULE: u8 = 5;    /* Module object. */
+pub const OBJ_STREAM: u8 = 6;    /* Stream object. */

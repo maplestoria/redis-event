@@ -2,7 +2,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{DataType, KeyValues, lzf, RdbEventHandler};
+use crate::{lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbEventHandler};
 use crate::rdb::Data::{Bytes, Empty};
 
 /// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
@@ -139,12 +139,11 @@ pub(crate) fn parse(socket: &mut dyn Read,
             RDB_TYPE_STRING => {
                 let key = read_string(socket)?;
                 let value = read_string(socket)?;
+                let mut values = Vec::with_capacity(1);
+                values.push(value);
                 handlers.iter().for_each(|handler|
-                    handler.handle(&KeyValues {
-                        key: &key,
-                        values: &vec![value.to_vec()],
-                        data_type: &DataType::String,
-                    }));
+                    handler.handle(&key, &values, OBJ_STRING)
+                );
             }
             RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST => {
                 let key = read_string(socket)?;
@@ -153,7 +152,7 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
                 let mut count = cursor.read_u16::<LittleEndian>()? as usize;
-                let mut values: Vec<Vec<u8>> = Vec::with_capacity(count + 1);
+                let mut values = Vec::with_capacity(count + 1);
                 
                 while count > 0 {
                     let field_name = read_zip_list_entry(cursor)?;
@@ -164,21 +163,18 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 }
                 let _type;
                 if data_type == RDB_TYPE_HASH_ZIPLIST {
-                    _type = DataType::Hash;
+                    _type = OBJ_HASH;
                 } else {
-                    _type = DataType::SortedSet;
+                    _type = OBJ_ZSET;
                 }
                 handlers.iter().for_each(|handler|
-                    handler.handle(&KeyValues {
-                        key: &key,
-                        values: &values,
-                        data_type: &_type,
-                    }));
+                    handler.handle(&key, &values, _type)
+                );
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = read_string(socket)?;
                 let (count, _) = read_length(socket)?;
-                let mut values: Vec<Vec<u8>> = vec![];
+                let mut values = vec![];
                 
                 let mut index = 0;
                 while index < count {
@@ -194,32 +190,24 @@ pub(crate) fn parse(socket: &mut dyn Read,
                     index += 1;
                 }
                 handlers.iter().for_each(|handler|
-                    handler.handle(&KeyValues {
-                        key: &key,
-                        values: &values,
-                        data_type: &DataType::List,
-                    }));
+                    handler.handle(&key, &values, OBJ_LIST));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = read_string(socket)?;
                 let (mut count, _) = read_length(socket)?;
-                let mut values: Vec<Vec<u8>> = Vec::with_capacity((count as usize) + 1);
+                let mut values = Vec::with_capacity((count as usize) + 1);
                 while count > 0 {
                     values.push(read_string(socket)?);
                     count -= 1;
                 }
                 let _type;
                 if data_type == RDB_TYPE_LIST {
-                    _type = DataType::List;
+                    _type = OBJ_LIST;
                 } else {
-                    _type = DataType::Set;
+                    _type = OBJ_SET;
                 }
                 handlers.iter().for_each(|handler|
-                    handler.handle(&KeyValues {
-                        key: &key,
-                        values: &values,
-                        data_type: &_type,
-                    }));
+                    handler.handle(&key, &values, _type));
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
