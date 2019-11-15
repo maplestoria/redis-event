@@ -19,10 +19,44 @@ pub trait RedisListener {
     fn close(&self);
 }
 
-// 代表一个redis事件
-pub trait Event {}
+// 定义redis rdb事件的处理接口
+pub trait RdbEventHandler {
+    fn handle(&self, e: &KeyValues);
+}
 
-// 定义redis事件的处理接口
-pub trait EventHandler {
-    fn handle(&mut self, e: &dyn Event);
+// 定义redis命令的处理接口
+pub trait CommandHandler {
+    fn handle(&self, c: &Command);
+}
+
+pub struct EchoRdbHandler {}
+
+impl RdbEventHandler for EchoRdbHandler {
+    fn handle(&self, e: &KeyValues) {
+        let key = e.key;
+        print!("[{:?}] {}: ", e.data_type, String::from_utf8(key.to_vec()).unwrap());
+        let val = e.values;
+        for x in val {
+            print!("{} ", String::from_utf8((x).to_vec()).unwrap());
+        }
+        println!();
+    }
+}
+
+pub struct Command {}
+
+pub struct KeyValues<'a> {
+    key: &'a Vec<u8>,
+    values: &'a Vec<Vec<u8>>,
+    data_type: &'a DataType,
+}
+
+#[derive(Debug)]
+pub enum DataType {
+    String,
+    List,
+    Set,
+    SortedSet,
+    Hash,
+    Stream,
 }

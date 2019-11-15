@@ -2,7 +2,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{EventHandler, lzf};
+use crate::{DataType, KeyValues, lzf, RdbEventHandler};
 use crate::rdb::Data::{Bytes, Empty};
 
 /// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
@@ -107,7 +107,7 @@ pub(crate) enum Data<B, V> {
 // 读取、解析rdb
 pub(crate) fn parse(socket: &mut dyn Read,
                     length: isize,
-                    rdb_listeners: &mut Vec<Box<dyn EventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+                    rdb_listeners: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -139,6 +139,14 @@ pub(crate) fn parse(socket: &mut dyn Read,
             RDB_TYPE_STRING => {
                 let key = read_string(socket)?;
                 let value = read_string(socket)?;
+                
+                for listener in rdb_listeners {
+                    listener.handle(&KeyValues {
+                        key: &key,
+                        values: &vec![value.to_vec()],
+                        data_type: &DataType::String,
+                    });
+                }
             }
             RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST => {
                 let key = read_string(socket)?;
@@ -147,22 +155,33 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
                 let mut count = cursor.read_u16::<LittleEndian>()? as usize;
-                let mut args: Vec<Vec<u8>> = Vec::with_capacity(count + 1);
-                args.push(key);
+                let mut values: Vec<Vec<u8>> = Vec::with_capacity(count + 1);
                 
                 while count > 0 {
                     let field_name = read_zip_list_entry(cursor)?;
                     let field_val = read_zip_list_entry(cursor)?;
-                    args.push(field_name);
-                    args.push(field_val);
+                    values.push(field_name);
+                    values.push(field_val);
                     count -= 2;
+                }
+                let _type;
+                if data_type == RDB_TYPE_HASH_ZIPLIST {
+                    _type = DataType::Hash;
+                } else {
+                    _type = DataType::SortedSet;
+                }
+                for listener in rdb_listeners {
+                    listener.handle(&KeyValues {
+                        key: &key,
+                        values: &values,
+                        data_type: &_type,
+                    });
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = read_string(socket)?;
                 let (count, _) = read_length(socket)?;
-                let mut args: Vec<Vec<u8>> = vec![];
-                args.insert(0, key);
+                let mut values: Vec<Vec<u8>> = vec![];
                 
                 let mut index = 0;
                 while index < count {
@@ -172,21 +191,39 @@ pub(crate) fn parse(socket: &mut dyn Read,
                     cursor.set_position(8);
                     let mut count = cursor.read_u16::<LittleEndian>()? as usize;
                     while count > 0 {
-                        let list_item = read_zip_list_entry(cursor)?;
-                        args.push(list_item);
+                        values.push(read_zip_list_entry(cursor)?);
                         count -= 1;
                     }
                     index += 1;
+                }
+                for listener in rdb_listeners {
+                    listener.handle(&KeyValues {
+                        key: &key,
+                        values: &values,
+                        data_type: &DataType::List,
+                    });
                 }
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = read_string(socket)?;
                 let (mut count, _) = read_length(socket)?;
-                let mut args: Vec<Vec<u8>> = Vec::with_capacity((count as usize) + 1);
-                args.push(key);
+                let mut values: Vec<Vec<u8>> = Vec::with_capacity((count as usize) + 1);
                 while count > 0 {
-                    args.push(read_string(socket)?);
+                    values.push(read_string(socket)?);
                     count -= 1;
+                }
+                let _type;
+                if data_type == RDB_TYPE_LIST {
+                    _type = DataType::List;
+                } else {
+                    _type = DataType::Set;
+                }
+                for listener in rdb_listeners {
+                    listener.handle(&KeyValues {
+                        key: &key,
+                        values: &values,
+                        data_type: &_type,
+                    });
                 }
             }
             RDB_OPCODE_EOF => {
@@ -202,7 +239,7 @@ pub(crate) fn parse(socket: &mut dyn Read,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &mut Vec<Box<dyn EventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![];
         for _ in 0..length {

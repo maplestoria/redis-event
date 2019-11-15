@@ -6,7 +6,7 @@ pub mod standalone {
     
     use byteorder::ReadBytesExt;
     
-    use crate::{config, EventHandler, rdb, RedisListener};
+    use crate::{CommandHandler, config, rdb, RdbEventHandler, RedisListener};
     use crate::config::Config;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
@@ -19,8 +19,8 @@ pub mod standalone {
         stream: Option<TcpStream>,
         id: &'static str,
         offset: i64,
-        rdb_listener: Vec<Box<dyn EventHandler>>,
-        command_listener: Vec<Box<dyn EventHandler>>,
+        rdb_listeners: Vec<Box<dyn RdbEventHandler>>,
+        cmd_listeners: Vec<Box<dyn CommandHandler>>,
     }
     
     impl Listener {
@@ -69,7 +69,7 @@ pub mod standalone {
             writer.flush()
         }
         
-        fn response(&mut self, func: fn(&mut dyn Read, isize, &mut Vec<Box<dyn EventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
+        fn response(&mut self, func: fn(&mut dyn Read, isize, &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                     -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
             let mut socket = self.stream.as_ref().unwrap();
             let response_type = socket.read_u8()?;
@@ -114,7 +114,7 @@ pub mod standalone {
                         let length = String::from_utf8(bytes).unwrap();
                         let length = length.parse::<isize>().unwrap();
                         let stream = self.stream.as_mut().unwrap();
-                        return func(stream, length, &mut self.rdb_listener);
+                        return func(stream, length, &self.rdb_listeners);
                     } else {
                         return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
                     }
@@ -161,12 +161,12 @@ pub mod standalone {
             Ok(Empty)
         }
         
-        fn add_rdb_listener(&mut self, listener: Box<dyn EventHandler>) {
-            self.rdb_listener.push(listener)
+        pub fn add_rdb_listener(&mut self, listener: Box<dyn RdbEventHandler>) {
+            self.rdb_listeners.push(listener)
         }
         
-        fn add_command_listener(&mut self, listener: Box<dyn EventHandler>) {
-            self.command_listener.push(listener)
+        pub fn add_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
+            self.cmd_listeners.push(listener)
         }
     }
     
@@ -208,8 +208,8 @@ pub mod standalone {
             stream: Option::None,
             id: "?",
             offset: -1,
-            rdb_listener: Vec::new(),
-            command_listener: Vec::new(),
+            rdb_listeners: Vec::new(),
+            cmd_listeners: Vec::new(),
         }
     }
 }
