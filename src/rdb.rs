@@ -107,7 +107,7 @@ pub(crate) enum Data<B, V> {
 // 读取、解析rdb
 pub(crate) fn parse(socket: &mut dyn Read,
                     length: isize,
-                    rdb_listeners: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+                    handlers: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -139,14 +139,12 @@ pub(crate) fn parse(socket: &mut dyn Read,
             RDB_TYPE_STRING => {
                 let key = read_string(socket)?;
                 let value = read_string(socket)?;
-                
-                for listener in rdb_listeners {
-                    listener.handle(&KeyValues {
+                handlers.iter().for_each(|handler|
+                    handler.handle(&KeyValues {
                         key: &key,
                         values: &vec![value.to_vec()],
                         data_type: &DataType::String,
-                    });
-                }
+                    }));
             }
             RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST => {
                 let key = read_string(socket)?;
@@ -170,13 +168,12 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 } else {
                     _type = DataType::SortedSet;
                 }
-                for listener in rdb_listeners {
-                    listener.handle(&KeyValues {
+                handlers.iter().for_each(|handler|
+                    handler.handle(&KeyValues {
                         key: &key,
                         values: &values,
                         data_type: &_type,
-                    });
-                }
+                    }));
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = read_string(socket)?;
@@ -196,13 +193,12 @@ pub(crate) fn parse(socket: &mut dyn Read,
                     }
                     index += 1;
                 }
-                for listener in rdb_listeners {
-                    listener.handle(&KeyValues {
+                handlers.iter().for_each(|handler|
+                    handler.handle(&KeyValues {
                         key: &key,
                         values: &values,
                         data_type: &DataType::List,
-                    });
-                }
+                    }));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = read_string(socket)?;
@@ -218,13 +214,12 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 } else {
                     _type = DataType::Set;
                 }
-                for listener in rdb_listeners {
-                    listener.handle(&KeyValues {
+                handlers.iter().for_each(|handler|
+                    handler.handle(&KeyValues {
                         key: &key,
                         values: &values,
                         data_type: &_type,
-                    });
-                }
+                    }));
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
