@@ -5,40 +5,94 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crate::{EventHandler, lzf};
 use crate::rdb::Data::{Bytes, Empty};
 
-// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
+/// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 pub(crate) const CR: u8 = b'\r';
 pub(crate) const LF: u8 = b'\n';
-// 代表array响应
+/// 代表array响应
 pub(crate) const STAR: u8 = b'*';
-// 代表bulk string响应
+/// 代表bulk string响应
 pub(crate) const DOLLAR: u8 = b'$';
-// 代表simple string响应
+/// 代表simple string响应
 pub(crate) const PLUS: u8 = b'+';
-// 代表error响应
+/// 代表error响应
 pub(crate) const MINUS: u8 = b'-';
-// 代表integer响应
+/// 代表integer响应
 pub(crate) const COLON: u8 = b':';
 
-// 代表 aux field
-const AUX: u8 = 0xFA;
-// 当前redis db
-const SELECT_DB: u8 = 0xFE;
-// db的key数量
-const DB_SIZE: u8 = 0xFB;
-// 代表字符串的数据
-const STRING: u8 = 0;
-const LIST: u8 = 1;
-const SET: u8 = 2;
-const ZSET_ZIP_LIST: u8 = 12;
-const HASH_ZIP_LIST: u8 = 13;
-const LIST_QUICK_LIST: u8 = 14;
-// end of file
-const EOF: u8 = 0xFF;
-const ZIP_INT_8BIT: u8 = 0xFE;
-const ZIP_INT_16BIT: u8 = 0xC0;
-const ZIP_INT_24BIT: u8 = 0xF0;
-const ZIP_INT_32BIT: u8 = 0xD0;
-const ZIP_INT_64BIT: u8 = 0xE0;
+/// Defines related to the dump file format. To store 32 bits lengths for short
+/// keys requires a lot of space, so we check the most significant 2 bits of
+/// the first byte to interpreter the length:
+///
+/// 00|XXXXXX => if the two MSB are 00 the len is the 6 bits of this byte
+/// 01|XXXXXX XXXXXXXX =>  01, the len is 14 byes, 6 bits + 8 bits of next byte
+/// 10|000000 [32 bit integer] => A full 32 bit len in net byte order will follow
+/// 10|000001 [64 bit integer] => A full 64 bit len in net byte order will follow
+/// 11|OBKIND this means: specially encoded object will follow. The six bits
+///           number specify the kind of object that follows.
+///           See the RDB_ENC_* defines.
+///
+/// Lengths up to 63 are stored using a single byte, most DB keys, and may
+/// values, will fit inside.
+const RDB_ENCVAL: u8 = 3;
+const RDB_6BITLEN: u8 = 0;
+const RDB_14BITLEN: u8 = 1;
+const RDB_32BITLEN: u8 = 0x80;
+const RDB_64BITLEN: u8 = 0x81;
+
+/// When a length of a string object stored on disk has the first two bits
+/// set, the remaining six bits specify a special encoding for the object
+/// accordingly to the following defines:
+///
+/// 8 bit signed integer
+const RDB_ENC_INT8: isize = 0;
+/// 16 bit signed integer
+const RDB_ENC_INT16: isize = 1;
+/// 32 bit signed integer
+const RDB_ENC_INT32: isize = 2;
+/// string compressed with FASTLZ
+const RDB_ENC_LZF: isize = 3;
+
+
+/// Map object types to RDB object types.
+///
+const RDB_TYPE_STRING: u8 = 0;
+const RDB_TYPE_LIST: u8 = 1;
+const RDB_TYPE_SET: u8 = 2;
+const RDB_TYPE_ZSET: u8 = 3;
+const RDB_TYPE_HASH: u8 = 4;
+/// ZSET version 2 with doubles stored in binary.
+const RDB_TYPE_ZSET_2: u8 = 5;
+const RDB_TYPE_MODULE: u8 = 6;
+/// Module value with annotations for parsing without
+/// the generating module being loaded.
+const RDB_TYPE_MODULE_2: u8 = 7;
+
+/// Object types for encoded objects.
+///
+const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
+const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
+const RDB_TYPE_SET_INTSET: u8 = 11;
+const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
+const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
+const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
+const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
+
+/// Special RDB opcodes
+///
+/// RDB aux field.
+const RDB_OPCODE_AUX: u8 = 250;
+/// Hash table resize hint.
+const RDB_OPCODE_RESIZEDB: u8 = 251;
+/// DB number of the following keys.
+const RDB_OPCODE_SELECTDB: u8 = 254;
+/// End of the RDB file.
+const RDB_OPCODE_EOF: u8 = 255;
+
+const ZIP_INT_8BIT: u8 = 254;
+const ZIP_INT_16BIT: u8 = 192;
+const ZIP_INT_24BIT: u8 = 240;
+const ZIP_INT_32BIT: u8 = 208;
+const ZIP_INT_64BIT: u8 = 224;
 
 // 用于包装redis的返回值
 pub(crate) enum Data<B, V> {
@@ -65,28 +119,28 @@ pub(crate) fn parse(socket: &mut dyn Read,
     loop {
         let data_type = socket.read_u8()?;
         match data_type {
-            AUX => {
+            RDB_OPCODE_AUX => {
                 let field_name = read_string(socket)?;
                 let field_val = read_string(socket)?;
                 let field_name = String::from_utf8(field_name).unwrap();
                 let field_val = String::from_utf8(field_val).unwrap();
                 println!("{}:{}", field_name, field_val);
             }
-            SELECT_DB => {
-                let db = read_length(socket)?;
-                println!("db: {}", db.val);
+            RDB_OPCODE_SELECTDB => {
+                let (db, _) = read_length(socket)?;
+                println!("db: {}", db);
             }
-            DB_SIZE => {
-                let db = read_length(socket)?;
-                println!("db total keys: {}", db.val);
-                let db = read_length(socket)?;
-                println!("db expired keys: {}", db.val);
+            RDB_OPCODE_RESIZEDB => {
+                let (db, _) = read_length(socket)?;
+                println!("db total keys: {}", db);
+                let (db, _) = read_length(socket)?;
+                println!("db expired keys: {}", db);
             }
-            STRING => {
+            RDB_TYPE_STRING => {
                 let key = read_string(socket)?;
                 let value = read_string(socket)?;
             }
-            HASH_ZIP_LIST | ZSET_ZIP_LIST => {
+            RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST => {
                 let key = read_string(socket)?;
                 let bytes = read_string(socket)?;
                 let cursor = &mut Cursor::new(&bytes);
@@ -104,14 +158,14 @@ pub(crate) fn parse(socket: &mut dyn Read,
                     count -= 2;
                 }
             }
-            LIST_QUICK_LIST => {
+            RDB_TYPE_LIST_QUICKLIST => {
                 let key = read_string(socket)?;
-                let count = read_length(socket)?;
+                let (count, _) = read_length(socket)?;
                 let mut args: Vec<Vec<u8>> = vec![];
                 args.insert(0, key);
                 
                 let mut index = 0;
-                while index < count.val {
+                while index < count {
                     let data = read_string(socket)?;
                     let cursor = &mut Cursor::new(&data);
                     // 跳过ZL_BYTES和ZL_TAIL
@@ -125,17 +179,17 @@ pub(crate) fn parse(socket: &mut dyn Read,
                     index += 1;
                 }
             }
-            LIST | SET => {
+            RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = read_string(socket)?;
-                let mut count = read_length(socket)?;
-                let mut args: Vec<Vec<u8>> = Vec::with_capacity((count.val as usize) + 1);
+                let (mut count, _) = read_length(socket)?;
+                let mut args: Vec<Vec<u8>> = Vec::with_capacity((count as usize) + 1);
                 args.push(key);
-                while count.val > 0 {
+                while count > 0 {
                     args.push(read_string(socket)?);
-                    count.val -= 1;
+                    count -= 1;
                 }
             }
-            EOF => {
+            RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
                     read_integer(socket, 8, true)?;
                 }
@@ -173,68 +227,60 @@ pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &mut Vec<Box<d
 
 // 读取一个string
 fn read_string(socket: &mut dyn Read) -> Result<Vec<u8>, Error> {
-    let length = read_length(socket)?;
-    if length.is_special {
-        match length.val {
-            0 => {
+    let (length, is_encoded) = read_length(socket)?;
+    if is_encoded {
+        match length {
+            RDB_ENC_INT8 => {
                 let int = socket.read_i8()?;
                 return Ok(int.to_string().into_bytes());
             }
-            1 => {
+            RDB_ENC_INT16 => {
                 let int = read_integer(socket, 2, false)?;
                 return Ok(int.to_string().into_bytes());
             }
-            2 => {
+            RDB_ENC_INT32 => {
                 let int = read_integer(socket, 4, false)?;
                 return Ok(int.to_string().into_bytes());
             }
-            3 => {
-                let compressed_len = read_length(socket)?;
-                let origin_len = read_length(socket)?;
-                let mut compressed = vec![0; compressed_len.val as usize];
+            RDB_ENC_LZF => {
+                let (compressed_len, _) = read_length(socket)?;
+                let (origin_len, _) = read_length(socket)?;
+                let mut compressed = vec![0; compressed_len as usize];
                 socket.read_exact(&mut compressed)?;
-                let mut origin = vec![0; origin_len.val as usize];
-                lzf::decompress(&mut compressed, compressed_len.val, &mut origin, origin_len.val);
+                let mut origin = vec![0; origin_len as usize];
+                lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
                 return Ok(origin);
             }
             _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid string length"))
         };
     };
-    let mut buff = vec![0; length.val as usize];
+    let mut buff = vec![0; length as usize];
     socket.read_exact(&mut buff)?;
     Ok(buff)
 }
 
-struct Length {
-    val: isize,
-    is_special: bool,
-}
-
 // 读取redis响应中下一条数据的长度
-fn read_length(socket: &mut dyn Read) -> Result<Length, Error> {
+fn read_length(socket: &mut dyn Read) -> Result<(isize, bool), Error> {
     let byte = socket.read_u8()?;
-    
-    let byte_and = byte & 0xFF;
-    
     let _type = (byte & 0xC0) >> 6;
     
     let mut result = -1;
-    let mut is_special = false;
+    let mut is_encoded = false;
     
-    if _type == 3 {
+    if _type == RDB_ENCVAL {
         result = (byte & 0x3F) as isize;
-        is_special = true;
-    } else if _type == 0 {
+        is_encoded = true;
+    } else if _type == RDB_6BITLEN {
         result = (byte & 0x3F) as isize;
-    } else if _type == 1 {
+    } else if _type == RDB_14BITLEN {
         let next_byte = socket.read_u8()?;
         result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
-    } else if byte_and == 0x80 {
+    } else if byte == RDB_32BITLEN {
         result = read_integer(socket, 4, true)?;
-    } else if byte_and == 0x81 {
+    } else if byte == RDB_64BITLEN {
         result = read_integer(socket, 8, true)?;
     };
-    Ok(Length { val: result, is_special })
+    Ok((result, is_encoded))
 }
 
 fn read_integer(socket: &mut dyn Read, size: isize, is_big_endian: bool) -> Result<isize, Error> {
