@@ -1,4 +1,4 @@
-use std::io::{BufRead, Cursor, Error, ErrorKind, Read};
+use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
@@ -428,7 +428,7 @@ fn read_integer(input: &mut dyn Read, size: isize, is_big_endian: bool) -> Resul
 
 fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize, Error> {
     let len = cursor.read_u8()?;
-    if len >= 0 && len <= 253 {
+    if len <= 253 {
         return Ok(len as usize);
     } else if len == 254 {
         let value = cursor.read_u32::<BigEndian>()?;
