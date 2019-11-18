@@ -1,4 +1,4 @@
-use std::io::{Cursor, Error, ErrorKind, Read};
+use std::io::{BufRead, Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
@@ -105,49 +105,49 @@ pub(crate) enum Data<B, V> {
 }
 
 // 读取、解析rdb
-pub(crate) fn parse(socket: &mut dyn Read,
+pub(crate) fn parse(input: &mut dyn Read,
                     length: isize,
                     handlers: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
-    socket.read_exact(&mut bytes)?;
+    input.read_exact(&mut bytes)?;
     // 4个字节: rdb版本
-    socket.read_exact(&mut bytes[..=3])?;
+    input.read_exact(&mut bytes[..=3])?;
     let rdb_version = String::from_utf8(bytes[..=3].to_vec()).unwrap();
     let rdb_version = rdb_version.parse::<isize>().unwrap();
     loop {
-        let data_type = socket.read_u8()?;
+        let data_type = input.read_u8()?;
         match data_type {
             RDB_OPCODE_AUX => {
-                let field_name = read_string(socket)?;
-                let field_val = read_string(socket)?;
+                let field_name = read_string(input)?;
+                let field_val = read_string(input)?;
                 let field_name = String::from_utf8(field_name).unwrap();
                 let field_val = String::from_utf8(field_val).unwrap();
                 println!("{}:{}", field_name, field_val);
             }
             RDB_OPCODE_SELECTDB => {
-                let (db, _) = read_length(socket)?;
+                let (db, _) = read_length(input)?;
                 println!("db: {}", db);
             }
             RDB_OPCODE_RESIZEDB => {
-                let (db, _) = read_length(socket)?;
+                let (db, _) = read_length(input)?;
                 println!("db total keys: {}", db);
-                let (db, _) = read_length(socket)?;
+                let (db, _) = read_length(input)?;
                 println!("db expired keys: {}", db);
             }
             RDB_TYPE_STRING => {
-                let key = read_string(socket)?;
-                let value = read_string(socket)?;
+                let key = read_string(input)?;
+                let value = read_string(input)?;
                 let mut values = Vec::with_capacity(1);
                 values.push(value);
                 handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_STRING)
                 );
             }
-            RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST => {
-                let key = read_string(socket)?;
-                let bytes = read_string(socket)?;
+            RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST | RDB_TYPE_LIST_ZIPLIST => {
+                let key = read_string(input)?;
+                let bytes = read_string(input)?;
                 let cursor = &mut Cursor::new(&bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
@@ -164,21 +164,23 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 let _type;
                 if data_type == RDB_TYPE_HASH_ZIPLIST {
                     _type = OBJ_HASH;
-                } else {
+                } else if data_type == RDB_TYPE_ZSET_ZIPLIST {
                     _type = OBJ_ZSET;
+                } else {
+                    _type = OBJ_LIST;
                 }
                 handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, _type)
                 );
             }
             RDB_TYPE_LIST_QUICKLIST => {
-                let key = read_string(socket)?;
-                let (count, _) = read_length(socket)?;
+                let key = read_string(input)?;
+                let (count, _) = read_length(input)?;
                 let mut values = vec![];
                 
                 let mut index = 0;
                 while index < count {
-                    let data = read_string(socket)?;
+                    let data = read_string(input)?;
                     let cursor = &mut Cursor::new(&data);
                     // 跳过ZL_BYTES和ZL_TAIL
                     cursor.set_position(8);
@@ -193,11 +195,11 @@ pub(crate) fn parse(socket: &mut dyn Read,
                     handler.handle(&key, &values, OBJ_LIST));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
-                let key = read_string(socket)?;
-                let (mut count, _) = read_length(socket)?;
+                let key = read_string(input)?;
+                let (mut count, _) = read_length(input)?;
                 let mut values = Vec::with_capacity((count as usize) + 1);
                 while count > 0 {
-                    values.push(read_string(socket)?);
+                    values.push(read_string(input)?);
                     count -= 1;
                 }
                 let _type;
@@ -209,9 +211,83 @@ pub(crate) fn parse(socket: &mut dyn Read,
                 handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, _type));
             }
+            RDB_TYPE_ZSET => {
+                let key = read_string(input)?;
+                let (mut count, _) = read_length(input)?;
+                let mut values = Vec::new();
+                while count > 0 {
+                    let element = read_string(input)?;
+                    let score = read_double(input)?;
+                    values.push(element);
+                    values.push(score);
+                    count -= 1;
+                }
+                handlers.iter().for_each(|handler|
+                    handler.handle(&key, &values, OBJ_ZSET));
+            }
+            RDB_TYPE_ZSET_2 => {
+                let key = read_string(input)?;
+                let (mut count, _) = read_length(input)?;
+                let mut values = Vec::new();
+                while count > 0 {
+                    let element = read_string(input)?;
+                    let score = input.read_i64::<LittleEndian>()?;
+                    let score_str = score.to_string().into_bytes();
+                    values.push(element);
+                    values.push(score_str);
+                    count -= 1;
+                }
+                handlers.iter().for_each(|handler|
+                    handler.handle(&key, &values, OBJ_ZSET));
+            }
+            RDB_TYPE_HASH => {
+                let key = read_string(input)?;
+                let (mut count, _) = read_length(input)?;
+                let mut values = Vec::new();
+                while count > 0 {
+                    let field = read_string(input)?;
+                    let value = read_string(input)?;
+                    values.push(field);
+                    values.push(value);
+                    count -= 1;
+                }
+                handlers.iter().for_each(|handler|
+                    handler.handle(&key, &values, OBJ_HASH));
+            }
+            RDB_TYPE_HASH_ZIPMAP => {
+                let key = read_string(input)?;
+                let bytes = read_string(input)?;
+                let mut values = Vec::new();
+                let cursor = &mut Cursor::new(&bytes);
+                cursor.set_position(1);
+                loop {
+                    let zm_len = read_zm_len(cursor)?;
+                    if zm_len == 255 {
+                        break;
+                    }
+                    let mut field = Vec::with_capacity(zm_len as usize);
+                    cursor.read_exact(&mut field)?;
+                    values.push(field);
+                    let zm_len = read_zm_len(cursor)?;
+                    if zm_len == 255 {
+                        values.push([].to_vec());
+                        break;
+                    }
+                    let free = cursor.read_i8()?;
+                    let mut value = Vec::with_capacity(zm_len as usize);
+                    cursor.read_exact(&mut value)?;
+                    cursor.set_position(cursor.position() + free as u64);
+                    values.push(value);
+                }
+                handlers.iter().for_each(|handler|
+                    handler.handle(&key, &values, OBJ_HASH));
+            }
+            RDB_TYPE_SET_INTSET => {
+                // TODO
+            }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
-                    read_integer(socket, 8, true)?;
+                    read_integer(input, 8, true)?;
                 }
                 break;
             }
@@ -222,14 +298,14 @@ pub(crate) fn parse(socket: &mut dyn Read,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+pub(crate) fn read_bytes(input: &mut dyn Read, length: isize, _: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![];
         for _ in 0..length {
-            bytes.push(socket.read_u8()?);
+            bytes.push(input.read_u8()?);
         }
         let end = &mut [0; 2];
-        socket.read_exact(end)?;
+        input.read_exact(end)?;
         if end == b"\r\n" {
             return Ok(Bytes(bytes));
         } else {
@@ -237,7 +313,7 @@ pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &Vec<Box<dyn R
         }
     } else if length == 0 {
         // length == 0 代表空字符，后面还有CRLF
-        socket.read_exact(&mut [0; 2])?;
+        input.read_exact(&mut [0; 2])?;
         return Ok(Empty);
     } else {
         // length < 0 代表null
@@ -245,28 +321,50 @@ pub(crate) fn read_bytes(socket: &mut dyn Read, length: isize, _: &Vec<Box<dyn R
     }
 }
 
+// 读取一个double
+fn read_double(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
+    let len = input.read_u8()?;
+    match len {
+        255 => {
+            // TODO NEGATIVE_INFINITY
+        }
+        254 => {
+            // TODO POSITIVE_INFINITY
+        }
+        253 => {
+            // TODO NaN
+        }
+        _ => {
+            let mut buff = Vec::with_capacity(len as usize);
+            input.read_exact(&mut buff)?;
+            return Ok(buff);
+        }
+    }
+    Ok(Vec::new())
+}
+
 // 读取一个string
-fn read_string(socket: &mut dyn Read) -> Result<Vec<u8>, Error> {
-    let (length, is_encoded) = read_length(socket)?;
+fn read_string(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
+    let (length, is_encoded) = read_length(input)?;
     if is_encoded {
         match length {
             RDB_ENC_INT8 => {
-                let int = socket.read_i8()?;
+                let int = input.read_i8()?;
                 return Ok(int.to_string().into_bytes());
             }
             RDB_ENC_INT16 => {
-                let int = read_integer(socket, 2, false)?;
+                let int = read_integer(input, 2, false)?;
                 return Ok(int.to_string().into_bytes());
             }
             RDB_ENC_INT32 => {
-                let int = read_integer(socket, 4, false)?;
+                let int = read_integer(input, 4, false)?;
                 return Ok(int.to_string().into_bytes());
             }
             RDB_ENC_LZF => {
-                let (compressed_len, _) = read_length(socket)?;
-                let (origin_len, _) = read_length(socket)?;
+                let (compressed_len, _) = read_length(input)?;
+                let (origin_len, _) = read_length(input)?;
                 let mut compressed = vec![0; compressed_len as usize];
-                socket.read_exact(&mut compressed)?;
+                input.read_exact(&mut compressed)?;
                 let mut origin = vec![0; origin_len as usize];
                 lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
                 return Ok(origin);
@@ -275,13 +373,13 @@ fn read_string(socket: &mut dyn Read) -> Result<Vec<u8>, Error> {
         };
     };
     let mut buff = vec![0; length as usize];
-    socket.read_exact(&mut buff)?;
+    input.read_exact(&mut buff)?;
     Ok(buff)
 }
 
 // 读取redis响应中下一条数据的长度
-fn read_length(socket: &mut dyn Read) -> Result<(isize, bool), Error> {
-    let byte = socket.read_u8()?;
+fn read_length(input: &mut dyn Read) -> Result<(isize, bool), Error> {
+    let byte = input.read_u8()?;
     let _type = (byte & 0xC0) >> 6;
     
     let mut result = -1;
@@ -293,19 +391,19 @@ fn read_length(socket: &mut dyn Read) -> Result<(isize, bool), Error> {
     } else if _type == RDB_6BITLEN {
         result = (byte & 0x3F) as isize;
     } else if _type == RDB_14BITLEN {
-        let next_byte = socket.read_u8()?;
+        let next_byte = input.read_u8()?;
         result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
     } else if byte == RDB_32BITLEN {
-        result = read_integer(socket, 4, true)?;
+        result = read_integer(input, 4, true)?;
     } else if byte == RDB_64BITLEN {
-        result = read_integer(socket, 8, true)?;
+        result = read_integer(input, 8, true)?;
     };
     Ok((result, is_encoded))
 }
 
-fn read_integer(socket: &mut dyn Read, size: isize, is_big_endian: bool) -> Result<isize, Error> {
+fn read_integer(input: &mut dyn Read, size: isize, is_big_endian: bool) -> Result<isize, Error> {
     let mut buff = vec![0; size as usize];
-    socket.read_exact(&mut buff)?;
+    input.read_exact(&mut buff)?;
     let mut cursor = Cursor::new(&buff);
     
     if is_big_endian {
@@ -326,6 +424,17 @@ fn read_integer(socket: &mut dyn Read, size: isize, is_big_endian: bool) -> Resu
         };
     }
     Err(Error::new(ErrorKind::InvalidData, "Invalid integer size"))
+}
+
+fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize, Error> {
+    let len = cursor.read_u8()?;
+    if len >= 0 && len <= 253 {
+        return Ok(len as usize);
+    } else if len == 254 {
+        let value = cursor.read_u32::<BigEndian>()?;
+        return Ok(value as usize);
+    }
+    Ok(len as usize)
 }
 
 fn read_zip_list_entry(cursor: &mut Cursor<&Vec<u8>>) -> Result<Vec<u8>, Error> {
