@@ -181,15 +181,15 @@ pub mod standalone {
                 if resp.starts_with("FULLRESYNC") {
                     self.response(rdb::parse)?;
                     let mut iter = resp.split_whitespace();
-                    if let Some(repl_offset) = iter.nth(1) {
-                        self.repl_id = repl_offset.to_owned();
+                    if let Some(repl_id) = iter.nth(1) {
+                        self.repl_id = repl_id.to_owned();
                     } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect replication offset"));
+                        return Err(Error::new(ErrorKind::InvalidData, "Expect replication id, bot got None"));
                     }
-                    if let Some(string) = iter.nth(2) {
-                        self.repl_offset = string.parse::<i64>().unwrap();
+                    if let Some(repl_offset) = iter.next() {
+                        self.repl_offset = repl_offset.parse::<i64>().unwrap();
                     } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect replication id"));
+                        return Err(Error::new(ErrorKind::InvalidData, "Expect replication offset, bot got None"));
                     }
                 }
                 // TODO 其他返回信息的处理
@@ -203,12 +203,11 @@ pub mod standalone {
             // TODO
         }
         
-        fn receive_cmd(&mut self) -> Result<Vec<Vec<u8>>, Error> {
+        fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
             // read begin
-            self.response(rdb::read_bytes)?;
+            return self.response(rdb::read_bytes);
             // read end, and get total bytes read
             // first TODO
-            Ok(Vec::new())
         }
     }
     
@@ -220,7 +219,14 @@ pub mod standalone {
             let mode = self.start_sync()?;
             // TODO check sync mode return
             loop {
-                self.receive_cmd()?;
+                match self.receive_cmd() {
+                    Ok(Data::Bytes(cmd)) => return Err(Error::new(ErrorKind::InvalidData, "Expect BytesVec response, but got Bytes")),
+                    Ok(Data::BytesVec(cmd)) => {
+                        println!("cmd: {:?}", cmd);
+                    }
+                    Err(err) => return Err(err),
+                    Ok(Empty) => println!("empty response")
+                }
             }
         }
         
