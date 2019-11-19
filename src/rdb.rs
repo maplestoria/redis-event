@@ -284,7 +284,35 @@ pub(crate) fn parse(input: &mut dyn Read,
                     handler.handle(&key, &values, OBJ_HASH));
             }
             RDB_TYPE_SET_INTSET => {
-                // TODO
+                let key = read_string(input)?;
+                let bytes = read_string(input)?;
+                let mut cursor = Cursor::new(&bytes);
+                let encoding = cursor.read_i32::<LittleEndian>()?;
+                let mut length = cursor.read_u32::<LittleEndian>()?;
+                let mut values = Vec::with_capacity(length as usize);
+                while length > 0 {
+                    match encoding {
+                        2 => {
+                            let member = cursor.read_i16::<LittleEndian>()?;
+                            let member = member.to_string().into_bytes();
+                            values.push(member);
+                        }
+                        4 => {
+                            let member = cursor.read_i32::<LittleEndian>()?;
+                            let member = member.to_string().into_bytes();
+                            values.push(member);
+                        }
+                        8 => {
+                            let member = cursor.read_i64::<LittleEndian>()?;
+                            let member = member.to_string().into_bytes();
+                            values.push(member);
+                        }
+                        _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid integer size")),
+                    }
+                    length -= 1;
+                }
+                handlers.iter().for_each(|handler|
+                    handler.handle(&key, &values, OBJ_SET));
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {

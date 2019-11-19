@@ -10,8 +10,6 @@ mod test_case {
     
     #[test]
     fn open() {
-        let nan = INFINITY.to_string().into_bytes();
-        println!("{:?}", nan);
         let ip = IpAddr::from_str("127.0.0.1").unwrap();
         let mut redis_listener = standalone::new(SocketAddr::new(ip, 6379), "123456");
         redis_listener.add_rdb_listener(Box::new(EchoRdbHandler {}));
