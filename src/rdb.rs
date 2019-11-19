@@ -3,7 +3,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbEventHandler};
+use crate::{CommandHandler, lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbEventHandler};
 use crate::rdb::Data::{Bytes, Empty};
 
 /// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
@@ -108,7 +108,8 @@ pub(crate) enum Data<B, V> {
 // 读取、解析rdb
 pub(crate) fn parse(input: &mut dyn Read,
                     length: isize,
-                    handlers: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+                    rdb_handlers: &Vec<Box<dyn RdbEventHandler>>,
+                    cmd_handler: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -142,7 +143,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                 let value = read_string(input)?;
                 let mut values = Vec::with_capacity(1);
                 values.push(value);
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_STRING)
                 );
             }
@@ -170,7 +171,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                 } else {
                     _type = OBJ_LIST;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, _type)
                 );
             }
@@ -192,7 +193,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                     }
                     index += 1;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_LIST));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
@@ -209,7 +210,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                 } else {
                     _type = OBJ_SET;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, _type));
             }
             RDB_TYPE_ZSET => {
@@ -223,7 +224,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                     values.push(score);
                     count -= 1;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_ZSET));
             }
             RDB_TYPE_ZSET_2 => {
@@ -238,7 +239,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                     values.push(score_str);
                     count -= 1;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_ZSET));
             }
             RDB_TYPE_HASH => {
@@ -252,7 +253,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                     values.push(value);
                     count -= 1;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_HASH));
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -280,7 +281,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                     cursor.set_position(cursor.position() + free as u64);
                     values.push(value);
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_HASH));
             }
             RDB_TYPE_SET_INTSET => {
@@ -311,7 +312,7 @@ pub(crate) fn parse(input: &mut dyn Read,
                     }
                     length -= 1;
                 }
-                handlers.iter().for_each(|handler|
+                rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &values, OBJ_SET));
             }
             RDB_OPCODE_EOF => {
@@ -327,7 +328,7 @@ pub(crate) fn parse(input: &mut dyn Read,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut dyn Read, length: isize, _: &Vec<Box<dyn RdbEventHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+pub(crate) fn read_bytes(input: &mut dyn Read, length: isize, _: &Vec<Box<dyn RdbEventHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![];
         for _ in 0..length {
