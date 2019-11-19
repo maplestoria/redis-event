@@ -1,3 +1,4 @@
+use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -326,13 +327,13 @@ fn read_double(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
     let len = input.read_u8()?;
     match len {
         255 => {
-            // TODO NEGATIVE_INFINITY
+            return Ok(NEG_INFINITY.to_string().into_bytes());
         }
         254 => {
-            // TODO POSITIVE_INFINITY
+            return Ok(INFINITY.to_string().into_bytes());
         }
         253 => {
-            // TODO NaN
+            return Ok(NAN.to_string().into_bytes());
         }
         _ => {
             let mut buff = Vec::with_capacity(len as usize);
@@ -340,7 +341,6 @@ fn read_double(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
             return Ok(buff);
         }
     }
-    Ok(Vec::new())
 }
 
 // 读取一个string
