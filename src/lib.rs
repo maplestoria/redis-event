@@ -4,6 +4,7 @@ mod config;
 mod listener;
 mod lzf;
 mod rdb;
+mod reader;
 mod tests;
 
 // 定义redis监听者接口

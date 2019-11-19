@@ -5,6 +5,7 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::{CommandHandler, lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbEventHandler};
 use crate::rdb::Data::{Bytes, Empty};
+use crate::reader::Reader;
 
 /// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 pub(crate) const CR: u8 = b'\r';
@@ -106,7 +107,7 @@ pub(crate) enum Data<B, V> {
 }
 
 // 读取、解析rdb
-pub(crate) fn parse(input: &mut dyn Read,
+pub(crate) fn parse(input: &mut Reader,
                     length: isize,
                     rdb_handlers: &Vec<Box<dyn RdbEventHandler>>,
                     cmd_handler: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
@@ -328,7 +329,7 @@ pub(crate) fn parse(input: &mut dyn Read,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut dyn Read, length: isize, _: &Vec<Box<dyn RdbEventHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbEventHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![];
         for _ in 0..length {
@@ -352,7 +353,7 @@ pub(crate) fn read_bytes(input: &mut dyn Read, length: isize, _: &Vec<Box<dyn Rd
 }
 
 // 读取一个double
-fn read_double(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
+fn read_double(input: &mut Reader) -> Result<Vec<u8>, Error> {
     let len = input.read_u8()?;
     match len {
         255 => {
@@ -373,27 +374,27 @@ fn read_double(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
 }
 
 // 读取一个string
-fn read_string(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
-    let (length, is_encoded) = read_length(input)?;
+fn read_string(reader: &mut Reader) -> Result<Vec<u8>, Error> {
+    let (length, is_encoded) = read_length(reader)?;
     if is_encoded {
         match length {
             RDB_ENC_INT8 => {
-                let int = input.read_i8()?;
+                let int = reader.read_i8()?;
                 return Ok(int.to_string().into_bytes());
             }
             RDB_ENC_INT16 => {
-                let int = read_integer(input, 2, false)?;
+                let int = read_integer(reader, 2, false)?;
                 return Ok(int.to_string().into_bytes());
             }
             RDB_ENC_INT32 => {
-                let int = read_integer(input, 4, false)?;
+                let int = read_integer(reader, 4, false)?;
                 return Ok(int.to_string().into_bytes());
             }
             RDB_ENC_LZF => {
-                let (compressed_len, _) = read_length(input)?;
-                let (origin_len, _) = read_length(input)?;
+                let (compressed_len, _) = read_length(reader)?;
+                let (origin_len, _) = read_length(reader)?;
                 let mut compressed = vec![0; compressed_len as usize];
-                input.read_exact(&mut compressed)?;
+                reader.read_exact(&mut compressed)?;
                 let mut origin = vec![0; origin_len as usize];
                 lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
                 return Ok(origin);
@@ -402,13 +403,13 @@ fn read_string(input: &mut dyn Read) -> Result<Vec<u8>, Error> {
         };
     };
     let mut buff = vec![0; length as usize];
-    input.read_exact(&mut buff)?;
+    reader.read_exact(&mut buff)?;
     Ok(buff)
 }
 
 // 读取redis响应中下一条数据的长度
-fn read_length(input: &mut dyn Read) -> Result<(isize, bool), Error> {
-    let byte = input.read_u8()?;
+fn read_length(reader: &mut Reader) -> Result<(isize, bool), Error> {
+    let byte = reader.read_u8()?;
     let _type = (byte & 0xC0) >> 6;
     
     let mut result = -1;
@@ -420,17 +421,17 @@ fn read_length(input: &mut dyn Read) -> Result<(isize, bool), Error> {
     } else if _type == RDB_6BITLEN {
         result = (byte & 0x3F) as isize;
     } else if _type == RDB_14BITLEN {
-        let next_byte = input.read_u8()?;
+        let next_byte = reader.read_u8()?;
         result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
     } else if byte == RDB_32BITLEN {
-        result = read_integer(input, 4, true)?;
+        result = read_integer(reader, 4, true)?;
     } else if byte == RDB_64BITLEN {
-        result = read_integer(input, 8, true)?;
+        result = read_integer(reader, 8, true)?;
     };
     Ok((result, is_encoded))
 }
 
-fn read_integer(input: &mut dyn Read, size: isize, is_big_endian: bool) -> Result<isize, Error> {
+fn read_integer(input: &mut Reader, size: isize, is_big_endian: bool) -> Result<isize, Error> {
     let mut buff = vec![0; size as usize];
     input.read_exact(&mut buff)?;
     let mut cursor = Cursor::new(&buff);

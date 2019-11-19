@@ -1,23 +1,22 @@
 pub mod standalone {
-    use std::io::{BufWriter, Error, ErrorKind, Read, Write};
+    use std::io::{BufWriter, Error, ErrorKind, Write};
     use std::net::{Shutdown, SocketAddr, TcpStream};
     use std::result::Result;
     use std::result::Result::Ok;
     
-    use byteorder::ReadBytesExt;
-    
     use crate::{CommandHandler, config, rdb, RdbEventHandler, RedisListener};
     use crate::config::Config;
     use crate::listener::standalone::SyncMode::PSync;
-    use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, read_bytes, STAR};
+    use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
+    use crate::reader::Reader;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener<'a> {
         addr: SocketAddr,
         password: &'a str,
         config: Config,
-        stream: Option<TcpStream>,
+        reader: Option<Reader>,
         repl_id: String,
         repl_offset: i64,
         rdb_listeners: Vec<Box<dyn RdbEventHandler>>,
@@ -28,7 +27,7 @@ pub mod standalone {
         fn connect(&mut self) -> Result<(), Error> {
             let stream = TcpStream::connect(self.addr)?;
             println!("connected to server!");
-            self.stream = Option::Some(stream);
+            self.reader = Option::Some(Reader::new(stream));
             Ok(())
         }
         
@@ -41,8 +40,8 @@ pub mod standalone {
         }
         
         fn send_port(&mut self) -> Result<(), Error> {
-            let stream = self.stream.as_ref().unwrap();
-            let port = stream.local_addr()?.port().to_string();
+            let reader = self.reader.as_ref().unwrap();
+            let port = reader.stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
             self.send(b"REPLCONF", &[b"listening-port", port])?;
             self.response(rdb::read_bytes)?;
@@ -50,8 +49,8 @@ pub mod standalone {
         }
         
         fn send(&self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
-            let stream = self.stream.as_ref().unwrap();
-            let mut writer = BufWriter::new(stream);
+            let reader = self.reader.as_ref().unwrap();
+            let mut writer = BufWriter::new(&reader.stream);
             writer.write(&[STAR])?;
             let args_len = args.len() + 1;
             writer.write(&args_len.to_string().into_bytes())?;
@@ -69,10 +68,10 @@ pub mod standalone {
             }
             writer.flush()
         }
-        
-        fn response(&mut self, func: fn(&mut dyn Read, isize, &Vec<Box<dyn RdbEventHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
+    
+        fn response(&mut self, func: fn(&mut Reader, isize, &Vec<Box<dyn RdbEventHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                     -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
-            let mut socket = self.stream.as_ref().unwrap();
+            let socket = self.reader.as_mut().unwrap();
             let response_type = socket.read_u8()?;
             match response_type {
                 // Plus: Simple String
@@ -114,7 +113,7 @@ pub mod standalone {
                     if byte == LF {
                         let length = String::from_utf8(bytes).unwrap();
                         let length = length.parse::<isize>().unwrap();
-                        let stream = self.stream.as_mut().unwrap();
+                        let stream = self.reader.as_mut().unwrap();
                         return func(stream, length, &self.rdb_listeners, &self.cmd_listeners);
                     } else {
                         return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
@@ -220,21 +219,21 @@ pub mod standalone {
             // TODO check sync mode return
             loop {
                 match self.receive_cmd() {
-                    Ok(Data::Bytes(cmd)) => return Err(Error::new(ErrorKind::InvalidData, "Expect BytesVec response, but got Bytes")),
+                    Ok(Data::Bytes(_)) => return Err(Error::new(ErrorKind::InvalidData, "Expect BytesVec response, but got Bytes")),
                     Ok(Data::BytesVec(cmd)) => {
                         println!("cmd: {:?}", cmd);
                     }
                     Err(err) => return Err(err),
-                    Ok(Empty) => println!("empty response")
+                    Ok(Empty) => {}
                 }
             }
         }
         
         fn close(&self) {
-            let option = self.stream.as_ref();
-            if self.stream.is_some() {
-                println!("close connection with server...");
-                option.unwrap().shutdown(Shutdown::Both).unwrap();
+            if let Some(reader) = &self.reader {
+                if let Err(err) = reader.stream.shutdown(Shutdown::Both) {
+                    eprintln!("close connect error: {}", err);
+                }
             }
         }
     }
@@ -244,7 +243,7 @@ pub mod standalone {
             addr,
             password,
             config: config::default(),
-            stream: Option::None,
+            reader: Option::None,
             repl_id: String::from("?"),
             repl_offset: -1,
             rdb_listeners: Vec::new(),
