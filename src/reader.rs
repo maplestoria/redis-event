@@ -1,5 +1,5 @@
 use std::io;
-use std::io::Read;
+use std::io::{ErrorKind, Read, Error};
 use std::net::TcpStream;
 
 use byteorder::{ByteOrder, ReadBytesExt};
@@ -7,11 +7,12 @@ use byteorder::{ByteOrder, ReadBytesExt};
 pub(crate) struct Reader {
     pub(crate) stream: TcpStream,
     len: i64,
+    marked: bool,
 }
 
 impl Reader {
     pub(crate) fn new(stream: TcpStream) -> Reader {
-        Reader { stream, len: 0 }
+        Reader { stream, len: 0, marked: false }
     }
     
     pub(crate) fn read_u8(&mut self) -> io::Result<u8> {
@@ -32,9 +33,17 @@ impl Reader {
         self.stream.read_i8()
     }
     
-    pub(crate) fn mark(&mut self) {}
+    pub(crate) fn mark(&mut self) {
+        self.marked = true;
+    }
     
-    pub(crate) fn unmark(&mut self) -> i64 {
-        self.len
+    pub(crate) fn unmark(&mut self) -> io::Result<i64> {
+        if self.marked {
+            let len = self.len;
+            self.len = 0;
+            self.marked = false;
+            return Ok(len);
+        }
+        return Err(Error::new(ErrorKind::Other, "Reader not marked"));
     }
 }

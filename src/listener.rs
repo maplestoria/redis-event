@@ -68,7 +68,7 @@ pub mod standalone {
             }
             writer.flush()
         }
-    
+        
         fn response(&mut self, func: fn(&mut Reader, isize, &Vec<Box<dyn RdbEventHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                     -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
             let socket = self.reader.as_mut().unwrap();
@@ -204,9 +204,12 @@ pub mod standalone {
         
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
             // read begin
-            return self.response(rdb::read_bytes);
+            self.reader.as_mut().unwrap().mark();
+            let cmd = self.response(rdb::read_bytes);
+            let read_len = self.reader.as_mut().unwrap().unmark()?;
+            self.repl_offset += read_len;
+            return cmd;
             // read end, and get total bytes read
-            // first TODO
         }
     }
     
