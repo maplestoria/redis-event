@@ -3,6 +3,9 @@ pub mod standalone {
     use std::net::{Shutdown, SocketAddr, TcpStream};
     use std::result::Result;
     use std::result::Result::Ok;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
     
     use crate::{CommandHandler, config, rdb, RdbEventHandler, RedisListener};
     use crate::config::Config;
@@ -10,6 +13,7 @@ pub mod standalone {
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
     use crate::reader::Reader;
+    use std::borrow::Borrow;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener<'a> {
@@ -21,6 +25,8 @@ pub mod standalone {
         repl_offset: i64,
         rdb_listeners: Vec<Box<dyn RdbEventHandler>>,
         cmd_listeners: Vec<Box<dyn CommandHandler>>,
+        t_heartbeat: thread::JoinHandle<()>,
+        sender: mpsc::Sender<i64>,
     }
     
     impl Listener<'_> {
@@ -198,16 +204,13 @@ pub mod standalone {
             Ok(PSync)
         }
         
-        fn start_heartbeat(&mut self) {
-            // TODO
-        }
-        
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
             // read begin
             self.reader.as_mut().unwrap().mark();
             let cmd = self.response(rdb::read_bytes);
             let read_len = self.reader.as_mut().unwrap().unmark()?;
             self.repl_offset += read_len;
+            self.sender.send(self.repl_offset);
             return cmd;
             // read end, and get total bytes read
         }
@@ -242,6 +245,18 @@ pub mod standalone {
     }
     
     pub(crate) fn new(addr: SocketAddr, password: &str) -> Listener {
+        let (sender, receiver) = mpsc::channel();
+        
+        let t = thread::spawn(move || {
+            let mut offset = 0;
+            loop {
+                if let Ok(new_offset) = receiver.recv_timeout(Duration::from_millis(2000)) {
+                    offset = new_offset;
+                }
+                println!("offset: {}", offset);
+            }
+        });
+        
         Listener {
             addr,
             password,
@@ -251,6 +266,8 @@ pub mod standalone {
             repl_offset: -1,
             rdb_listeners: Vec::new(),
             cmd_listeners: Vec::new(),
+            t_heartbeat: t,
+            sender,
         }
     }
     
