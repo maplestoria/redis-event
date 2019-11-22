@@ -13,7 +13,6 @@ pub mod standalone {
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
     use crate::reader::Reader;
-    use std::borrow::Borrow;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener<'a> {
@@ -25,8 +24,8 @@ pub mod standalone {
         repl_offset: i64,
         rdb_listeners: Vec<Box<dyn RdbEventHandler>>,
         cmd_listeners: Vec<Box<dyn CommandHandler>>,
-        t_heartbeat: thread::JoinHandle<()>,
-        sender: mpsc::Sender<i64>,
+        t_heartbeat: HeartbeatWorker,
+        sender: mpsc::Sender<Message>,
     }
     
     impl Listener<'_> {
@@ -210,7 +209,7 @@ pub mod standalone {
             let cmd = self.response(rdb::read_bytes);
             let read_len = self.reader.as_mut().unwrap().unmark()?;
             self.repl_offset += read_len;
-            self.sender.send(self.repl_offset);
+            self.sender.send(Message::Some(self.repl_offset));
             return cmd;
             // read end, and get total bytes read
         }
@@ -234,12 +233,16 @@ pub mod standalone {
                 }
             }
         }
-        
-        fn close(&self) {
-            if let Some(reader) = &self.reader {
-                if let Err(err) = reader.stream.shutdown(Shutdown::Both) {
-                    eprintln!("close connect error: {}", err);
-                }
+    }
+    
+    impl Drop for Listener<'_> {
+        fn drop(&mut self) {
+            self.sender.send(Message::Terminate).unwrap();
+            if let Some(reader) = self.reader.take() {
+                reader.stream.shutdown(Shutdown::Both).unwrap();
+            };
+            if let Some(thread) = self.t_heartbeat.thread.take() {
+                thread.join().unwrap();
             }
         }
     }
@@ -250,11 +253,16 @@ pub mod standalone {
         let t = thread::spawn(move || {
             let mut offset = 0;
             loop {
-                if let Ok(new_offset) = receiver.recv_timeout(Duration::from_millis(2000)) {
-                    offset = new_offset;
+                match receiver.recv_timeout(Duration::from_millis(2000)) {
+                    Ok(Message::Terminate) => break,
+                    Ok(Message::Some(new_offset)) => {
+                        offset = new_offset;
+                    }
+                    Err(_) => {}
                 }
                 println!("offset: {}", offset);
             }
+            println!("terminated");
         });
         
         Listener {
@@ -266,9 +274,18 @@ pub mod standalone {
             repl_offset: -1,
             rdb_listeners: Vec::new(),
             cmd_listeners: Vec::new(),
-            t_heartbeat: t,
+            t_heartbeat: HeartbeatWorker { thread: Some(t) },
             sender,
         }
+    }
+    
+    struct HeartbeatWorker {
+        thread: Option<thread::JoinHandle<()>>
+    }
+    
+    enum Message {
+        Terminate,
+        Some(i64),
     }
     
     pub(crate) enum SyncMode {

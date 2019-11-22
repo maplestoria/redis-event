@@ -16,8 +16,6 @@ mod tests;
 pub trait RedisListener {
     // 开启监听
     fn open(&mut self) -> Result<(), Error>;
-    // 关闭监听
-    fn close(&self);
 }
 
 // 定义redis rdb事件的处理接口

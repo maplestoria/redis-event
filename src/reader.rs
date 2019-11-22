@@ -27,7 +27,7 @@ impl Reader {
     pub(crate) fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         self.stream.read_exact(buf)?;
         if self.marked {
-            self.len += (buf.len() as i64);
+            self.len += buf.len() as i64;
         };
         Ok(())
     }

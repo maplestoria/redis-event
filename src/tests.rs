@@ -16,6 +16,5 @@ mod test_case {
         if let Err(error) = redis_listener.open() {
             panic!("couldn't connect to server: {}", error)
         }
-        redis_listener.close();
     }
 }
