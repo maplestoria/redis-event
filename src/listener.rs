@@ -209,7 +209,7 @@ pub mod standalone {
             let cmd = self.response(rdb::read_bytes);
             let read_len = self.reader.as_mut().unwrap().unmark()?;
             self.repl_offset += read_len;
-            self.sender.send(Message::Some(self.repl_offset));
+            self.sender.send(Message::Some(self.repl_offset)).unwrap();
             return cmd;
             // read end, and get total bytes read
         }

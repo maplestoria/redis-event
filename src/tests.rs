@@ -6,7 +6,6 @@ mod test_case {
     
     use crate::{EchoRdbHandler, RedisListener};
     use crate::listener::standalone;
-    use std::f64::{NAN, INFINITY};
     
     #[test]
     fn open() {
