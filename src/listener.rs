@@ -1,9 +1,10 @@
 pub mod standalone {
     use std::io::{BufWriter, Error, ErrorKind, Write};
     use std::net::{Shutdown, SocketAddr, TcpStream};
+    use std::ops::Deref;
     use std::result::Result;
     use std::result::Result::Ok;
-    use std::sync::mpsc;
+    use std::sync::{Arc, mpsc, Mutex};
     use std::thread;
     use std::time::Duration;
     
@@ -25,14 +26,39 @@ pub mod standalone {
         rdb_listeners: Vec<Box<dyn RdbEventHandler>>,
         cmd_listeners: Vec<Box<dyn CommandHandler>>,
         t_heartbeat: HeartbeatWorker,
-        sender: mpsc::Sender<Message>,
+        sender: Option<mpsc::Sender<Message>>,
     }
     
     impl Listener<'_> {
         fn connect(&mut self) -> Result<(), Error> {
             let stream = TcpStream::connect(self.addr)?;
             println!("connected to server!");
-            self.reader = Option::Some(Reader::new(stream));
+            let stream = Arc::new(Mutex::new(stream));
+            let stream_clone = Arc::clone(&stream);
+    
+            let (sender, receiver) = mpsc::channel();
+    
+            let t = thread::spawn(move || {
+                let mut offset = 0;
+                loop {
+                    match receiver.recv_timeout(Duration::from_millis(2000)) {
+                        Ok(Message::Terminate) => break,
+                        Ok(Message::Some(new_offset)) => {
+                            offset = new_offset;
+                        }
+                        Err(_) => {}
+                    }
+                    if let Ok(addr) = stream_clone.lock().unwrap().local_addr() {
+                        println!("{:?}", addr);
+                    }
+                    println!("offset: {}", offset);
+                }
+                println!("terminated");
+            });
+    
+            self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
+            self.sender = Some(sender);
+            self.reader = Option::Some(Reader::new(Arc::clone(&stream)));
             Ok(())
         }
         
@@ -46,7 +72,8 @@ pub mod standalone {
         
         fn send_port(&mut self) -> Result<(), Error> {
             let reader = self.reader.as_ref().unwrap();
-            let port = reader.stream.local_addr()?.port().to_string();
+    
+            let port = reader.stream.lock().unwrap().local_addr()?.port().to_string();
             let port = port.as_bytes();
             self.send(b"REPLCONF", &[b"listening-port", port])?;
             self.response(rdb::read_bytes)?;
@@ -55,7 +82,8 @@ pub mod standalone {
         
         fn send(&self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
             let reader = self.reader.as_ref().unwrap();
-            let mut writer = BufWriter::new(&reader.stream);
+            let guard = reader.stream.lock().unwrap();
+            let mut writer = BufWriter::new(guard.deref());
             writer.write(&[STAR])?;
             let args_len = args.len() + 1;
             writer.write(&args_len.to_string().into_bytes())?;
@@ -209,7 +237,7 @@ pub mod standalone {
             let cmd = self.response(rdb::read_bytes);
             let read_len = self.reader.as_mut().unwrap().unmark()?;
             self.repl_offset += read_len;
-            self.sender.send(Message::Some(self.repl_offset)).unwrap();
+            self.sender.as_ref().unwrap().send(Message::Some(self.repl_offset)).unwrap();
             return cmd;
             // read end, and get total bytes read
         }
@@ -237,9 +265,9 @@ pub mod standalone {
     
     impl Drop for Listener<'_> {
         fn drop(&mut self) {
-            self.sender.send(Message::Terminate).unwrap();
+            self.sender.as_ref().unwrap().send(Message::Terminate).unwrap();
             if let Some(reader) = self.reader.take() {
-                if let Err(_) = reader.stream.shutdown(Shutdown::Both) {}
+                if let Err(_) = reader.stream.lock().unwrap().shutdown(Shutdown::Both) {}
             };
             if let Some(thread) = self.t_heartbeat.thread.take() {
                 if let Err(_) = thread.join() {}
@@ -248,23 +276,6 @@ pub mod standalone {
     }
     
     pub(crate) fn new(addr: SocketAddr, password: &str) -> Listener {
-        let (sender, receiver) = mpsc::channel();
-        
-        let t = thread::spawn(move || {
-            let mut offset = 0;
-            loop {
-                match receiver.recv_timeout(Duration::from_millis(2000)) {
-                    Ok(Message::Terminate) => break,
-                    Ok(Message::Some(new_offset)) => {
-                        offset = new_offset;
-                    }
-                    Err(_) => {}
-                }
-                println!("offset: {}", offset);
-            }
-            println!("terminated");
-        });
-        
         Listener {
             addr,
             password,
@@ -274,8 +285,8 @@ pub mod standalone {
             repl_offset: -1,
             rdb_listeners: Vec::new(),
             cmd_listeners: Vec::new(),
-            t_heartbeat: HeartbeatWorker { thread: Some(t) },
-            sender,
+            t_heartbeat: HeartbeatWorker { thread: None },
+            sender: None,
         }
     }
     
