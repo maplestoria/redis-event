@@ -239,10 +239,10 @@ pub mod standalone {
         fn drop(&mut self) {
             self.sender.send(Message::Terminate).unwrap();
             if let Some(reader) = self.reader.take() {
-                reader.stream.shutdown(Shutdown::Both).unwrap();
+                if let Err(_) = reader.stream.shutdown(Shutdown::Both) {}
             };
             if let Some(thread) = self.t_heartbeat.thread.take() {
-                thread.join().unwrap();
+                if let Err(_) = thread.join() {}
             }
         }
     }
