@@ -41,17 +41,41 @@ pub mod standalone {
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 loop {
-                    match receiver.recv_timeout(Duration::from_millis(2000)) {
+                    match receiver.recv_timeout(Duration::from_millis(1000)) {
                         Ok(Message::Terminate) => break,
                         Ok(Message::Some(new_offset)) => {
                             offset = new_offset;
                         }
                         Err(_) => {}
                     }
-                    if let Ok(addr) = stream_clone.lock().unwrap().local_addr() {
-                        println!("{:?}", addr);
+                    if let Ok(mut mutex_guard) = stream_clone.lock() {
+                        let mut writer = BufWriter::new(mutex_guard.deref());
+                        writer.write(&[STAR]);
+                        let mut args = vec![];
+                        let ack = "ACK".as_bytes();
+                        args.push(&ack);
+                        let offset_str = offset.to_string();
+                        let offset_bytes = offset_str.as_bytes();
+                        args.push(&offset_bytes);
+                        let command = "REPLCONF".as_bytes();
+        
+                        let args_len = 3;
+                        writer.write(&args_len.to_string().into_bytes());
+                        writer.write(&[CR, LF, DOLLAR]);
+                        writer.write(&command.len().to_string().into_bytes());
+                        writer.write(&[CR, LF]);
+                        writer.write(command);
+                        writer.write(&[CR, LF]);
+                        for arg in args {
+                            writer.write(&[DOLLAR]);
+                            writer.write(&arg.len().to_string().into_bytes());
+                            writer.write(&[CR, LF]);
+                            writer.write(arg);
+                            writer.write(&[CR, LF]);
+                        }
+                        writer.flush();
+                        println!("offset: {}", offset);
                     }
-                    println!("offset: {}", offset);
                 }
                 println!("terminated");
             });
