@@ -5,7 +5,7 @@ pub mod standalone {
     use std::result::Result::Ok;
     use std::sync::mpsc;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     
     use crate::{CommandHandler, config, rdb, RdbEventHandler, RedisListener};
     use crate::config::Config;
@@ -39,18 +39,24 @@ pub mod standalone {
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 let output = stream_boxed.as_ref().as_ref().unwrap();
+                let mut timer = Instant::now();
+                let half_sec = Duration::from_millis(500);
                 loop {
-                    match receiver.recv_timeout(Duration::from_millis(1000)) {
+                    match receiver.recv_timeout(half_sec) {
                         Ok(Message::Terminate) => break,
                         Ok(Message::Some(new_offset)) => {
                             offset = new_offset;
                         }
                         Err(_) => {}
                     };
-                    let offset_str = offset.to_string();
-                    let offset_bytes = offset_str.as_bytes();
-                    if let Err(error) = send(output, b"REPLCONF", &[b"ACK", offset_bytes]) {
-                        println!("heartbeat error: {}", error);
+                    let elapsed = timer.elapsed();
+                    if elapsed.ge(&half_sec) {
+                        let offset_str = offset.to_string();
+                        let offset_bytes = offset_str.as_bytes();
+                        if let Err(error) = send(output, b"REPLCONF", &[b"ACK", offset_bytes]) {
+                            println!("heartbeat error: {}", error);
+                        }
+                        timer = Instant::now();
                     }
                 }
                 println!("terminated");
@@ -279,7 +285,7 @@ pub mod standalone {
         }
     }
     
-    pub(crate) fn new(addr: SocketAddr, password: &str) -> Listener {
+    pub fn new(addr: SocketAddr, password: &str) -> Listener {
         Listener {
             addr,
             password,

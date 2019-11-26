@@ -1,7 +1,7 @@
 use std::io::Error;
 
 mod config;
-mod listener;
+pub mod listener;
 mod lzf;
 mod rdb;
 mod reader;
