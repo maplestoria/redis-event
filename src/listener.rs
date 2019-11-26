@@ -39,7 +39,6 @@ pub mod standalone {
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 let output = stream_boxed.as_ref().as_ref().unwrap();
-                let mut writer = BufWriter::new(output);
                 loop {
                     match receiver.recv_timeout(Duration::from_millis(1000)) {
                         Ok(Message::Terminate) => break,
@@ -48,28 +47,11 @@ pub mod standalone {
                         }
                         Err(_) => {}
                     };
-                    writer.write(&[STAR]);
-                    let mut args = vec![];
-                    let ack = "ACK".as_bytes();
-                    args.push(&ack);
                     let offset_str = offset.to_string();
                     let offset_bytes = offset_str.as_bytes();
-                    args.push(&offset_bytes);
-                    let command = "REPLCONF".as_bytes();
-                    writer.write(&[b'3']);
-                    writer.write(&[CR, LF, DOLLAR]);
-                    writer.write(&command.len().to_string().into_bytes());
-                    writer.write(&[CR, LF]);
-                    writer.write(command);
-                    writer.write(&[CR, LF]);
-                    for arg in args {
-                        writer.write(&[DOLLAR]);
-                        writer.write(&arg.len().to_string().into_bytes());
-                        writer.write(&[CR, LF]);
-                        writer.write(arg);
-                        writer.write(&[CR, LF]);
-                    };
-                    writer.flush();
+                    if let Err(error) = send(output, b"REPLCONF", &[b"ACK", offset_bytes]) {
+                        println!("heartbeat error: {}", error);
+                    }
                 }
                 println!("terminated");
             });
@@ -82,7 +64,9 @@ pub mod standalone {
         
         fn auth(&mut self) -> Result<(), Error> {
             if !self.password.is_empty() {
-                self.send(b"AUTH", &[self.password.as_bytes()])?;
+                let reader = self.reader.as_ref().unwrap();
+                let writer = reader.stream.as_ref();
+                send(writer, b"AUTH", &[self.password.as_bytes()])?;
                 self.response(rdb::read_bytes)?;
             }
             Ok(())
@@ -92,30 +76,13 @@ pub mod standalone {
             let reader = self.reader.as_ref().unwrap();
             let port = reader.stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
-            self.send(b"REPLCONF", &[b"listening-port", port])?;
+            
+            let reader = self.reader.as_ref().unwrap();
+            let writer = reader.stream.as_ref();
+            
+            send(writer, b"REPLCONF", &[b"listening-port", port])?;
             self.response(rdb::read_bytes)?;
             Ok(())
-        }
-        
-        fn send(&self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
-            let reader = self.reader.as_ref().unwrap();
-            let mut writer = BufWriter::new(reader.stream.as_ref());
-            writer.write(&[STAR])?;
-            let args_len = args.len() + 1;
-            writer.write(&args_len.to_string().into_bytes())?;
-            writer.write(&[CR, LF, DOLLAR])?;
-            writer.write(&command.len().to_string().into_bytes())?;
-            writer.write(&[CR, LF])?;
-            writer.write(command)?;
-            writer.write(&[CR, LF])?;
-            for arg in args {
-                writer.write(&[DOLLAR])?;
-                writer.write(&arg.len().to_string().into_bytes())?;
-                writer.write(&[CR, LF])?;
-                writer.write(arg)?;
-                writer.write(&[CR, LF])?;
-            }
-            writer.flush()
         }
         
         fn response(&mut self, func: fn(&mut Reader, isize, &Vec<Box<dyn RdbEventHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
@@ -223,7 +190,10 @@ pub mod standalone {
             let repl_offset = offset.as_bytes();
             let repl_id = self.repl_id.as_bytes();
             
-            self.send(b"PSYNC", &[repl_id, repl_offset])?;
+            let reader = self.reader.as_ref().unwrap();
+            let writer = reader.stream.as_ref();
+            send(writer, b"PSYNC", &[repl_id, repl_offset])?;
+            
             if let Bytes(resp) = self.response(rdb::read_bytes)? {
                 let resp = String::from_utf8(resp).unwrap();
                 if resp.starts_with("FULLRESYNC") {
@@ -257,6 +227,26 @@ pub mod standalone {
             return cmd;
             // read end, and get total bytes read
         }
+    }
+    
+    fn send<T: Write>(output: T, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
+        let mut writer = BufWriter::new(output);
+        writer.write(&[STAR])?;
+        let args_len = args.len() + 1;
+        writer.write(&args_len.to_string().into_bytes())?;
+        writer.write(&[CR, LF, DOLLAR])?;
+        writer.write(&command.len().to_string().into_bytes())?;
+        writer.write(&[CR, LF])?;
+        writer.write(command)?;
+        writer.write(&[CR, LF])?;
+        for arg in args {
+            writer.write(&[DOLLAR])?;
+            writer.write(&arg.len().to_string().into_bytes())?;
+            writer.write(&[CR, LF])?;
+            writer.write(arg)?;
+            writer.write(&[CR, LF])?;
+        }
+        writer.flush()
     }
     
     impl RedisListener for Listener<'_> {
