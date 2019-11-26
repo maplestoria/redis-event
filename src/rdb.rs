@@ -81,10 +81,20 @@ const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
 
 /// Special RDB opcodes
 ///
+/// Module auxiliary data.
+const RDB_OPCODE_MODULE_AUX: u8 = 247;
+/// LRU idle time.
+const RDB_OPCODE_IDLE: u8 = 248;
+/// LFU frequency.
+const RDB_OPCODE_FREQ: u8 = 249;
 /// RDB aux field.
 const RDB_OPCODE_AUX: u8 = 250;
 /// Hash table resize hint.
 const RDB_OPCODE_RESIZEDB: u8 = 251;
+/// Expire time in milliseconds.
+const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
+/// Old expire time in seconds.
+const RDB_OPCODE_EXPIRETIME: u8 = 253;
 /// DB number of the following keys.
 const RDB_OPCODE_SELECTDB: u8 = 254;
 /// End of the RDB file.
@@ -138,6 +148,38 @@ pub(crate) fn parse(input: &mut Reader,
                 println!("db total keys: {}", db);
                 let (db, _) = read_length(input)?;
                 println!("db expired keys: {}", db);
+            }
+            RDB_OPCODE_EXPIRETIME => {}
+            RDB_OPCODE_EXPIRETIME_MS => {
+                let expire_times = read_integer(input, 8, false)?;
+                let _type = input.read_u8()?;
+                match _type {
+                    RDB_OPCODE_FREQ => {
+                        let frq = input.read_u8()?;
+                        let value_type = input.read_u8()?;
+                    }
+                    RDB_OPCODE_IDLE => {}
+                    _ => {}
+                    // TODO
+                }
+            }
+            RDB_OPCODE_FREQ => {
+                // TODO
+            }
+            RDB_OPCODE_IDLE => {
+                // TODO
+            }
+            RDB_OPCODE_MODULE_AUX => {
+                // TODO
+            }
+            RDB_TYPE_MODULE => {
+                // TODO
+            }
+            RDB_TYPE_MODULE_2 => {
+                // TODO
+            }
+            RDB_TYPE_STREAM_LISTPACKS => {
+                // TODO
             }
             RDB_TYPE_STRING => {
                 let key = read_string(input)?;

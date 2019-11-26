@@ -9,7 +9,7 @@ mod test_case {
     
     #[test]
     fn open() {
-        let ip = IpAddr::from_str("127.0.0.1").unwrap();
+        let ip = IpAddr::from_str("192.168.88.155").unwrap();
         let mut redis_listener = standalone::new(SocketAddr::new(ip, 6379), "123456");
         redis_listener.add_rdb_listener(Box::new(EchoRdbHandler {}));
         if let Err(error) = redis_listener.open() {
