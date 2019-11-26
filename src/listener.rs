@@ -1,10 +1,9 @@
 pub mod standalone {
     use std::io::{BufWriter, Error, ErrorKind, Write};
-    use std::net::{Shutdown, SocketAddr, TcpStream};
-    use std::ops::Deref;
+    use std::net::{SocketAddr, TcpStream};
     use std::result::Result;
     use std::result::Result::Ok;
-    use std::sync::{Arc, mpsc, Mutex};
+    use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
     
@@ -33,13 +32,14 @@ pub mod standalone {
         fn connect(&mut self) -> Result<(), Error> {
             let stream = TcpStream::connect(self.addr)?;
             println!("connected to server!");
-            let stream = Arc::new(Mutex::new(stream));
-            let stream_clone = Arc::clone(&stream);
-    
+            let stream_boxed = Box::new(stream.try_clone());
+            let stream = Box::new(stream);
             let (sender, receiver) = mpsc::channel();
-    
+            
             let t = thread::spawn(move || {
                 let mut offset = 0;
+                let output = stream_boxed.as_ref().as_ref().unwrap();
+                let mut writer = BufWriter::new(output);
                 loop {
                     match receiver.recv_timeout(Duration::from_millis(1000)) {
                         Ok(Message::Terminate) => break,
@@ -47,42 +47,36 @@ pub mod standalone {
                             offset = new_offset;
                         }
                         Err(_) => {}
-                    }
-                    if let Ok(mut mutex_guard) = stream_clone.lock() {
-                        let mut writer = BufWriter::new(mutex_guard.deref());
-                        writer.write(&[STAR]);
-                        let mut args = vec![];
-                        let ack = "ACK".as_bytes();
-                        args.push(&ack);
-                        let offset_str = offset.to_string();
-                        let offset_bytes = offset_str.as_bytes();
-                        args.push(&offset_bytes);
-                        let command = "REPLCONF".as_bytes();
-        
-                        let args_len = 3;
-                        writer.write(&args_len.to_string().into_bytes());
-                        writer.write(&[CR, LF, DOLLAR]);
-                        writer.write(&command.len().to_string().into_bytes());
+                    };
+                    writer.write(&[STAR]);
+                    let mut args = vec![];
+                    let ack = "ACK".as_bytes();
+                    args.push(&ack);
+                    let offset_str = offset.to_string();
+                    let offset_bytes = offset_str.as_bytes();
+                    args.push(&offset_bytes);
+                    let command = "REPLCONF".as_bytes();
+                    writer.write(&[b'3']);
+                    writer.write(&[CR, LF, DOLLAR]);
+                    writer.write(&command.len().to_string().into_bytes());
+                    writer.write(&[CR, LF]);
+                    writer.write(command);
+                    writer.write(&[CR, LF]);
+                    for arg in args {
+                        writer.write(&[DOLLAR]);
+                        writer.write(&arg.len().to_string().into_bytes());
                         writer.write(&[CR, LF]);
-                        writer.write(command);
+                        writer.write(arg);
                         writer.write(&[CR, LF]);
-                        for arg in args {
-                            writer.write(&[DOLLAR]);
-                            writer.write(&arg.len().to_string().into_bytes());
-                            writer.write(&[CR, LF]);
-                            writer.write(arg);
-                            writer.write(&[CR, LF]);
-                        }
-                        writer.flush();
-                        println!("offset: {}", offset);
-                    }
+                    };
+                    writer.flush();
                 }
                 println!("terminated");
             });
-    
+            
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
             self.sender = Some(sender);
-            self.reader = Option::Some(Reader::new(Arc::clone(&stream)));
+            self.reader = Option::Some(Reader::new(stream));
             Ok(())
         }
         
@@ -96,8 +90,7 @@ pub mod standalone {
         
         fn send_port(&mut self) -> Result<(), Error> {
             let reader = self.reader.as_ref().unwrap();
-    
-            let port = reader.stream.lock().unwrap().local_addr()?.port().to_string();
+            let port = reader.stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
             self.send(b"REPLCONF", &[b"listening-port", port])?;
             self.response(rdb::read_bytes)?;
@@ -106,8 +99,7 @@ pub mod standalone {
         
         fn send(&self, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
             let reader = self.reader.as_ref().unwrap();
-            let guard = reader.stream.lock().unwrap();
-            let mut writer = BufWriter::new(guard.deref());
+            let mut writer = BufWriter::new(reader.stream.as_ref());
             writer.write(&[STAR])?;
             let args_len = args.len() + 1;
             writer.write(&args_len.to_string().into_bytes())?;
@@ -290,9 +282,7 @@ pub mod standalone {
     impl Drop for Listener<'_> {
         fn drop(&mut self) {
             self.sender.as_ref().unwrap().send(Message::Terminate).unwrap();
-            if let Some(reader) = self.reader.take() {
-                if let Err(_) = reader.stream.lock().unwrap().shutdown(Shutdown::Both) {}
-            };
+            
             if let Some(thread) = self.t_heartbeat.thread.take() {
                 if let Err(_) = thread.join() {}
             }
