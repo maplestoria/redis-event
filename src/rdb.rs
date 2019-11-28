@@ -373,10 +373,8 @@ pub(crate) fn parse(input: &mut Reader,
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
 pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbEventHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
-        let mut bytes = vec![];
-        for _ in 0..length {
-            bytes.push(input.read_u8()?);
-        }
+        let mut bytes = vec![0; length as usize];
+        input.read_exact(&mut bytes)?;
         let end = &mut [0; 2];
         input.read_exact(end)?;
         if end == b"\r\n" {

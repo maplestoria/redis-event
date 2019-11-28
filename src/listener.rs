@@ -158,7 +158,7 @@ pub mod standalone {
                         if length <= 0 {
                             return Ok(Empty);
                         } else {
-                            let mut result = vec![];
+                            let mut result = Vec::with_capacity(length as usize);
                             for _ in 0..length {
                                 match self.response(rdb::read_bytes)? {
                                     Bytes(resp) => {
