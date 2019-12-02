@@ -195,16 +195,9 @@ pub(crate) fn parse(input: &mut Reader,
                 let cursor = &mut Cursor::new(bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
-                let mut count = cursor.read_u16::<LittleEndian>()? as usize;
-                let mut values = Vec::with_capacity(count + 1);
-                
-                while count > 0 {
-                    let field_name = read_zip_list_entry(cursor)?;
-                    let field_val = read_zip_list_entry(cursor)?;
-                    values.push(field_name);
-                    values.push(field_val);
-                    count -= 2;
-                }
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+    
                 let _type;
                 if data_type == RDB_TYPE_HASH_ZIPLIST {
                     _type = OBJ_HASH;
@@ -213,7 +206,10 @@ pub(crate) fn parse(input: &mut Reader,
                 } else {
                     _type = OBJ_LIST;
                 }
-                // TODO
+    
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, _type)
+                );
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = read_string(input)?;
@@ -239,30 +235,17 @@ pub(crate) fn parse(input: &mut Reader,
             }
             RDB_TYPE_ZSET => {
                 let key = read_string(input)?;
-                let (mut count, _) = read_length(input)?;
-                let mut values = Vec::new();
-                while count > 0 {
-                    let element = read_string(input)?;
-                    let score = read_double(input)?;
-                    values.push(element);
-                    values.push(score);
-                    count -= 1;
-                }
-                // TODO
+                let (count, _) = read_length(input)?;
+                let mut iter = SortedSetIter { count, v: 1, read_score: false, input };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_ZSET));
             }
             RDB_TYPE_ZSET_2 => {
                 let key = read_string(input)?;
-                let (mut count, _) = read_length(input)?;
-                let mut values = Vec::new();
-                while count > 0 {
-                    let element = read_string(input)?;
-                    let score = input.read_i64::<LittleEndian>()?;
-                    let score_str = score.to_string().into_bytes();
-                    values.push(element);
-                    values.push(score_str);
-                    count -= 1;
-                }
-                // TODO
+                let (count, _) = read_length(input)?;
+                let mut iter = SortedSetIter { count, v: 2, read_score: false, input };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_ZSET));
             }
             RDB_TYPE_HASH => {
                 let key = read_string(input)?;
@@ -553,6 +536,7 @@ impl Iter for StrValIter<'_> {
     }
 }
 
+/// ListQuickList的值迭代器
 struct QuickListIter<'a> {
     len: isize,
     count: isize,
@@ -562,6 +546,7 @@ struct QuickListIter<'a> {
 
 impl Iter for QuickListIter<'_> {
     fn next(&mut self) -> io::Result<Vec<u8>> {
+        // TODO fix error: failed to fill whole buffer
         if self.len == -1 && self.count > 0 {
             let data = read_string(self.input)?;
             self.cursor = Option::Some(Cursor::new(data));
@@ -592,5 +577,56 @@ impl Iter for QuickListIter<'_> {
 impl QuickListIter<'_> {
     fn has_more(&self) -> bool {
         self.len > 0 || self.count > 0
+    }
+}
+
+/// ZipList的值迭代器
+struct ZipListIter<'a> {
+    count: isize,
+    cursor: &'a mut Cursor<Vec<u8>>,
+}
+
+impl Iter for ZipListIter<'_> {
+    fn next(&mut self) -> Result<Vec<u8>, Error> {
+        if self.count > 0 {
+            let val = read_zip_list_entry(self.cursor)?;
+            self.count -= 1;
+            return Ok(val);
+        }
+        Err(Error::new(ErrorKind::NotFound, "No element left"))
+    }
+}
+
+/// SortedSet的值迭代器
+struct SortedSetIter<'a> {
+    count: isize,
+    /// v = 1, zset
+    /// v = 2, zset2
+    v: u8,
+    read_score: bool,
+    input: &'a mut Reader,
+}
+
+impl Iter for SortedSetIter<'_> {
+    fn next(&mut self) -> Result<Vec<u8>, Error> {
+        if self.count > 0 {
+            let val;
+            if self.read_score {
+                if self.v == 1 {
+                    val = read_double(self.input)?;
+                } else {
+                    // TODO zset2 score处理
+                    let score = self.input.read_i64::<LittleEndian>()?;
+                    val = score.to_string().into_bytes();
+                }
+                self.count -= 1;
+                self.read_score = false;
+            } else {
+                val = read_string(self.input)?;
+                self.read_score = true;
+            }
+            return Ok(val);
+        }
+        Err(Error::new(ErrorKind::NotFound, "No element left"))
     }
 }
