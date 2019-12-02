@@ -42,7 +42,6 @@ pub(crate) struct QuickListIter<'a> {
 
 impl Iter for QuickListIter<'_> {
     fn next(&mut self) -> io::Result<Vec<u8>> {
-        // TODO fix error: failed to fill whole buffer
         if self.len == -1 && self.count > 0 {
             let data = self.input.read_string()?;
             self.cursor = Option::Some(Cursor::new(data));
@@ -58,13 +57,15 @@ impl Iter for QuickListIter<'_> {
                 return self.next();
             }
         } else {
-            let val = read_zip_list_entry(self.cursor.as_mut().unwrap())?;
-            self.len -= 1;
-            if self.len == 0 {
-                self.len = -1;
-                self.count -= 1;
+            if self.count > 0 {
+                let val = read_zip_list_entry(self.cursor.as_mut().unwrap())?;
+                self.len -= 1;
+                if self.len == 0 {
+                    self.len = -1;
+                    self.count -= 1;
+                }
+                return Ok(val);
             }
-            return Ok(val);
         }
         Err(Error::new(ErrorKind::NotFound, "No element left"))
     }
