@@ -1,6 +1,5 @@
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
-use std::io;
-use std::io::{Cursor, Error, ErrorKind, Read};
+use std::io::{Cursor, Error, ErrorKind, Read, Result};
 use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
@@ -51,7 +50,7 @@ impl Reader {
         Reader { stream, len: 0, marked: false }
     }
     
-    pub(crate) fn read_u8(&mut self) -> io::Result<u8> {
+    pub(crate) fn read_u8(&mut self) -> Result<u8> {
         let mut buf = [0; 1];
         self.stream.read_exact(&mut buf)?;
         if self.marked {
@@ -60,7 +59,7 @@ impl Reader {
         Ok(buf[0])
     }
     
-    pub(crate) fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+    pub(crate) fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
         self.stream.read_exact(buf)?;
         if self.marked {
             self.len += buf.len() as i64;
@@ -68,7 +67,7 @@ impl Reader {
         Ok(())
     }
     
-    pub(crate) fn read_i64<T: ByteOrder>(&mut self) -> io::Result<i64> {
+    pub(crate) fn read_i64<T: ByteOrder>(&mut self) -> Result<i64> {
         let int = self.stream.read_i64::<T>()?;
         if self.marked {
             self.len += 8;
@@ -76,7 +75,7 @@ impl Reader {
         Ok(int)
     }
     
-    pub(crate) fn read_i8(&mut self) -> io::Result<i8> {
+    pub(crate) fn read_i8(&mut self) -> Result<i8> {
         let int = self.stream.read_i8()?;
         if self.marked {
             self.len += 1;
@@ -88,7 +87,7 @@ impl Reader {
         self.marked = true;
     }
     
-    pub(crate) fn unmark(&mut self) -> io::Result<i64> {
+    pub(crate) fn unmark(&mut self) -> Result<i64> {
         if self.marked {
             let len = self.len;
             self.len = 0;
@@ -99,7 +98,7 @@ impl Reader {
     }
     
     // 读取redis响应中下一条数据的长度
-    pub(crate) fn read_length(&mut self) -> io::Result<(isize, bool)> {
+    pub(crate) fn read_length(&mut self) -> Result<(isize, bool)> {
         let byte = self.read_u8()?;
         let _type = (byte & 0xC0) >> 6;
         
@@ -123,7 +122,7 @@ impl Reader {
     }
     
     // 从流中读取一个Integer
-    pub(crate) fn read_integer(&mut self, size: isize, is_big_endian: bool) -> io::Result<isize> {
+    pub(crate) fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
         let mut buff = vec![0; size as usize];
         self.read_exact(&mut buff)?;
         let mut cursor = Cursor::new(&buff);
@@ -149,7 +148,7 @@ impl Reader {
     }
     
     // 从流中读取一个string
-    pub(crate) fn read_string(&mut self) -> io::Result<Vec<u8>> {
+    pub(crate) fn read_string(&mut self) -> Result<Vec<u8>> {
         let (length, is_encoded) = self.read_length()?;
         if is_encoded {
             match length {
@@ -183,7 +182,7 @@ impl Reader {
     }
     
     // 从流中读取一个double
-    pub(crate) fn read_double(&mut self) -> io::Result<Vec<u8>> {
+    pub(crate) fn read_double(&mut self) -> Result<Vec<u8>> {
         let len = self.read_u8()?;
         match len {
             255 => {

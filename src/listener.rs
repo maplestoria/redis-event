@@ -1,7 +1,6 @@
 pub mod standalone {
-    use std::io::{BufWriter, Error, ErrorKind, Write};
+    use std::io::{BufWriter, Error, ErrorKind, Result, Write};
     use std::net::{SocketAddr, TcpStream};
-    use std::result::Result;
     use std::result::Result::Ok;
     use std::sync::mpsc;
     use std::thread;
@@ -29,13 +28,13 @@ pub mod standalone {
     }
     
     impl Listener<'_> {
-        fn connect(&mut self) -> Result<(), Error> {
+        fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.addr)?;
             println!("connected to server!");
             let stream_boxed = Box::new(stream.try_clone());
             let stream = Box::new(stream);
             let (sender, receiver) = mpsc::channel();
-            
+        
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 let output = stream_boxed.as_ref().as_ref().unwrap();
@@ -67,8 +66,8 @@ pub mod standalone {
             self.reader = Option::Some(Reader::new(stream));
             Ok(())
         }
-        
-        fn auth(&mut self) -> Result<(), Error> {
+    
+        fn auth(&mut self) -> Result<()> {
             if !self.password.is_empty() {
                 let reader = self.reader.as_ref().unwrap();
                 let writer = reader.stream.as_ref();
@@ -77,22 +76,25 @@ pub mod standalone {
             }
             Ok(())
         }
-        
-        fn send_port(&mut self) -> Result<(), Error> {
+    
+        fn send_port(&mut self) -> Result<()> {
             let reader = self.reader.as_ref().unwrap();
             let port = reader.stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
-            
+        
             let reader = self.reader.as_ref().unwrap();
             let writer = reader.stream.as_ref();
-            
+        
             send(writer, b"REPLCONF", &[b"listening-port", port])?;
             self.response(rdb::read_bytes)?;
             Ok(())
         }
-        
-        fn response(&mut self, func: fn(&mut Reader, isize, &Vec<Box<dyn RdbHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
-                    -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    
+        fn response(&mut self,
+                    func: fn(&mut Reader, isize,
+                             &Vec<Box<dyn RdbHandler>>, &Vec<Box<dyn CommandHandler>>,
+                    ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
+        ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             let socket = self.reader.as_mut().unwrap();
             let response_type = socket.read_u8()?;
             match response_type {
@@ -190,16 +192,16 @@ pub mod standalone {
         pub fn add_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
             self.cmd_listeners.push(listener)
         }
-        
-        fn start_sync(&mut self) -> Result<SyncMode, Error> {
+    
+        fn start_sync(&mut self) -> Result<SyncMode> {
             let offset = self.repl_offset.to_string();
             let repl_offset = offset.as_bytes();
             let repl_id = self.repl_id.as_bytes();
-            
+        
             let reader = self.reader.as_ref().unwrap();
             let writer = reader.stream.as_ref();
             send(writer, b"PSYNC", &[repl_id, repl_offset])?;
-            
+        
             if let Bytes(resp) = self.response(rdb::read_bytes)? {
                 let resp = String::from_utf8(resp).unwrap();
                 if resp.starts_with("FULLRESYNC") {
@@ -222,8 +224,8 @@ pub mod standalone {
             }
             Ok(PSync)
         }
-        
-        fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+    
+        fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             // read begin
             self.reader.as_mut().unwrap().mark();
             let cmd = self.response(rdb::read_bytes);
@@ -235,7 +237,7 @@ pub mod standalone {
         }
     }
     
-    fn send<T: Write>(output: T, command: &[u8], args: &[&[u8]]) -> Result<(), Error> {
+    fn send<T: Write>(output: T, command: &[u8], args: &[&[u8]]) -> Result<()> {
         let mut writer = BufWriter::new(output);
         writer.write(&[STAR])?;
         let args_len = args.len() + 1;
@@ -256,7 +258,7 @@ pub mod standalone {
     }
     
     impl RedisListener for Listener<'_> {
-        fn open(&mut self) -> Result<(), Error> {
+        fn open(&mut self) -> Result<()> {
             self.connect()?;
             self.auth()?;
             self.send_port()?;

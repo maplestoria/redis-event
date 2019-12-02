@@ -1,4 +1,4 @@
-use std::io::{Cursor, Error, ErrorKind, Read};
+use std::io::{Cursor, Error, ErrorKind, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
@@ -86,7 +86,7 @@ pub(crate) enum Data<B, V> {
 pub(crate) fn parse(input: &mut Reader,
                     length: isize,
                     rdb_handlers: &Vec<Box<dyn RdbHandler>>,
-                    cmd_handler: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+                    cmd_handler: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -248,7 +248,9 @@ pub(crate) fn parse(input: &mut Reader,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+pub(crate) fn read_bytes(input: &mut Reader, length: isize,
+                         _: &Vec<Box<dyn RdbHandler>>,
+                         _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {
         let mut bytes = vec![0; length as usize];
         input.read_exact(&mut bytes)?;
@@ -270,7 +272,7 @@ pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbH
     }
 }
 
-pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize, Error> {
+pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize> {
     let len = cursor.read_u8()?;
     if len <= 253 {
         return Ok(len as usize);
@@ -281,7 +283,7 @@ pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize, Error>
     Ok(len as usize)
 }
 
-pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8>, Error> {
+pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8>> {
     if cursor.read_u8()? >= 254 {
         cursor.read_u32::<LittleEndian>()?;
     }
