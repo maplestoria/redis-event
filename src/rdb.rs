@@ -265,30 +265,10 @@ pub(crate) fn parse(input: &mut Reader,
                 let bytes = read_string(input)?;
                 let mut cursor = Cursor::new(&bytes);
                 let encoding = cursor.read_i32::<LittleEndian>()?;
-                let mut length = cursor.read_u32::<LittleEndian>()?;
-                let mut values = Vec::with_capacity(length as usize);
-                while length > 0 {
-                    match encoding {
-                        2 => {
-                            let member = cursor.read_i16::<LittleEndian>()?;
-                            let member = member.to_string().into_bytes();
-                            values.push(member);
-                        }
-                        4 => {
-                            let member = cursor.read_i32::<LittleEndian>()?;
-                            let member = member.to_string().into_bytes();
-                            values.push(member);
-                        }
-                        8 => {
-                            let member = cursor.read_i64::<LittleEndian>()?;
-                            let member = member.to_string().into_bytes();
-                            values.push(member);
-                        }
-                        _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid integer size")),
-                    }
-                    length -= 1;
-                }
-                // TODO
+                let length = cursor.read_u32::<LittleEndian>()?;
+                let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_SET));
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
@@ -567,7 +547,7 @@ struct ZipListIter<'a> {
 }
 
 impl Iter for ZipListIter<'_> {
-    fn next(&mut self) -> Result<Vec<u8>, Error> {
+    fn next(&mut self) -> io::Result<Vec<u8>> {
         if self.count > 0 {
             let val = read_zip_list_entry(self.cursor)?;
             self.count -= 1;
@@ -588,7 +568,7 @@ struct SortedSetIter<'a> {
 }
 
 impl Iter for SortedSetIter<'_> {
-    fn next(&mut self) -> Result<Vec<u8>, Error> {
+    fn next(&mut self) -> io::Result<Vec<u8>> {
         if self.count > 0 {
             let val;
             if self.read_score {
@@ -619,7 +599,7 @@ struct ZipMapIter<'a> {
 }
 
 impl Iter for ZipMapIter<'_> {
-    fn next(&mut self) -> Result<Vec<u8>, Error> {
+    fn next(&mut self) -> io::Result<Vec<u8>> {
         if !self.has_more {
             return Err(Error::new(ErrorKind::NotFound, "No element left"));
         }
@@ -644,5 +624,41 @@ impl Iter for ZipMapIter<'_> {
             self.cursor.read_exact(&mut field)?;
             return Ok(field);
         }
+    }
+}
+
+/// IntSet的值迭代器
+struct IntSetIter<'a> {
+    encoding: i32,
+    count: isize,
+    cursor: &'a mut Cursor<&'a Vec<u8>>,
+}
+
+impl Iter for IntSetIter<'_> {
+    fn next(&mut self) -> io::Result<Vec<u8>> {
+        if self.count > 0 {
+            let val;
+            match self.encoding {
+                2 => {
+                    let member = self.cursor.read_i16::<LittleEndian>()?;
+                    let member = member.to_string().into_bytes();
+                    val = member;
+                }
+                4 => {
+                    let member = self.cursor.read_i32::<LittleEndian>()?;
+                    let member = member.to_string().into_bytes();
+                    val = member;
+                }
+                8 => {
+                    let member = self.cursor.read_i64::<LittleEndian>()?;
+                    let member = member.to_string().into_bytes();
+                    val = member;
+                }
+                _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid integer size")),
+            }
+            self.count -= 1;
+            return Ok(val);
+        }
+        return Err(Error::new(ErrorKind::NotFound, "No element left"));
     }
 }
