@@ -1,9 +1,10 @@
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::io::{Cursor, Error, ErrorKind, Read};
+use std::io;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbEventHandler};
+use crate::{CommandHandler, lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbHandler};
 use crate::rdb::Data::{Bytes, Empty};
 use crate::reader::Reader;
 
@@ -119,7 +120,7 @@ pub(crate) enum Data<B, V> {
 // 读取、解析rdb
 pub(crate) fn parse(input: &mut Reader,
                     length: isize,
-                    rdb_handlers: &Vec<Box<dyn RdbEventHandler>>,
+                    rdb_handlers: &Vec<Box<dyn RdbHandler>>,
                     cmd_handler: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     println!("rdb size: {} bytes", length);
     let mut bytes = vec![0; 5];
@@ -183,17 +184,15 @@ pub(crate) fn parse(input: &mut Reader,
             }
             RDB_TYPE_STRING => {
                 let key = read_string(input)?;
-                let value = read_string(input)?;
-                let mut values = Vec::with_capacity(1);
-                values.push(value);
+                let mut iter = StrValIter { count: 1, input };
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_STRING)
+                    handler.handle(&key, &mut iter, OBJ_STRING)
                 );
             }
             RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST | RDB_TYPE_LIST_ZIPLIST => {
                 let key = read_string(input)?;
                 let bytes = read_string(input)?;
-                let cursor = &mut Cursor::new(&bytes);
+                let cursor = &mut Cursor::new(bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
                 let mut count = cursor.read_u16::<LittleEndian>()? as usize;
@@ -214,39 +213,21 @@ pub(crate) fn parse(input: &mut Reader,
                 } else {
                     _type = OBJ_LIST;
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, _type)
-                );
+                // TODO
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = read_string(input)?;
                 let (count, _) = read_length(input)?;
-                let mut values = vec![];
-                
-                let mut index = 0;
-                while index < count {
-                    let data = read_string(input)?;
-                    let cursor = &mut Cursor::new(&data);
-                    // 跳过ZL_BYTES和ZL_TAIL
-                    cursor.set_position(8);
-                    let mut count = cursor.read_u16::<LittleEndian>()? as usize;
-                    while count > 0 {
-                        values.push(read_zip_list_entry(cursor)?);
-                        count -= 1;
-                    }
-                    index += 1;
-                }
+                let mut iter = QuickListIter { len: -1, count, input, cursor: Option::None };
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_LIST));
+                    handler.handle(&key, &mut iter, OBJ_LIST)
+                );
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = read_string(input)?;
-                let (mut count, _) = read_length(input)?;
-                let mut values = Vec::with_capacity((count as usize) + 1);
-                while count > 0 {
-                    values.push(read_string(input)?);
-                    count -= 1;
-                }
+                let (count, _) = read_length(input)?;
+                let mut iter = StrValIter { count, input };
+                
                 let _type;
                 if data_type == RDB_TYPE_LIST {
                     _type = OBJ_LIST;
@@ -254,7 +235,7 @@ pub(crate) fn parse(input: &mut Reader,
                     _type = OBJ_SET;
                 }
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, _type));
+                    handler.handle(&key, &mut iter, _type));
             }
             RDB_TYPE_ZSET => {
                 let key = read_string(input)?;
@@ -267,8 +248,7 @@ pub(crate) fn parse(input: &mut Reader,
                     values.push(score);
                     count -= 1;
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_ZSET));
+                // TODO
             }
             RDB_TYPE_ZSET_2 => {
                 let key = read_string(input)?;
@@ -282,22 +262,14 @@ pub(crate) fn parse(input: &mut Reader,
                     values.push(score_str);
                     count -= 1;
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_ZSET));
+                // TODO
             }
             RDB_TYPE_HASH => {
                 let key = read_string(input)?;
-                let (mut count, _) = read_length(input)?;
-                let mut values = Vec::new();
-                while count > 0 {
-                    let field = read_string(input)?;
-                    let value = read_string(input)?;
-                    values.push(field);
-                    values.push(value);
-                    count -= 1;
-                }
+                let (count, _) = read_length(input)?;
+                let mut iter = StrValIter { count, input };
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_HASH));
+                    handler.handle(&key, &mut iter, OBJ_HASH));
             }
             RDB_TYPE_HASH_ZIPMAP => {
                 let key = read_string(input)?;
@@ -324,8 +296,7 @@ pub(crate) fn parse(input: &mut Reader,
                     cursor.set_position(cursor.position() + free as u64);
                     values.push(value);
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_HASH));
+                // TODO
             }
             RDB_TYPE_SET_INTSET => {
                 let key = read_string(input)?;
@@ -355,8 +326,7 @@ pub(crate) fn parse(input: &mut Reader,
                     }
                     length -= 1;
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &values, OBJ_SET));
+                // TODO
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
@@ -371,7 +341,7 @@ pub(crate) fn parse(input: &mut Reader,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbEventHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
+pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbHandler>>, _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
     if length > 0 {
         let mut bytes = vec![0; length as usize];
         input.read_exact(&mut bytes)?;
@@ -507,7 +477,7 @@ fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize, Error> {
     Ok(len as usize)
 }
 
-fn read_zip_list_entry(cursor: &mut Cursor<&Vec<u8>>) -> Result<Vec<u8>, Error> {
+fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8>, Error> {
     if cursor.read_u8()? >= 254 {
         cursor.read_u32::<LittleEndian>()?;
     }
@@ -559,5 +529,68 @@ fn read_zip_list_entry(cursor: &mut Cursor<&Vec<u8>>) -> Result<Vec<u8>, Error> 
             let result = (flag - 0xF1) as isize;
             return Ok(result.to_string().into_bytes());
         }
+    }
+}
+
+pub trait Iter {
+    fn next(&mut self) -> io::Result<Vec<u8>>;
+}
+
+/// 字符串类型的值迭代器
+struct StrValIter<'a> {
+    count: isize,
+    input: &'a mut Reader,
+}
+
+impl Iter for StrValIter<'_> {
+    fn next(&mut self) -> io::Result<Vec<u8>> {
+        while self.count > 0 {
+            let val = read_string(self.input)?;
+            self.count -= 1;
+            return Ok(val);
+        }
+        Err(Error::new(ErrorKind::NotFound, "No element left"))
+    }
+}
+
+struct QuickListIter<'a> {
+    len: isize,
+    count: isize,
+    input: &'a mut Reader,
+    cursor: Option<Cursor<Vec<u8>>>,
+}
+
+impl Iter for QuickListIter<'_> {
+    fn next(&mut self) -> io::Result<Vec<u8>> {
+        if self.len == -1 && self.count > 0 {
+            let data = read_string(self.input)?;
+            self.cursor = Option::Some(Cursor::new(data));
+            // 跳过ZL_BYTES和ZL_TAIL
+            let cursor = self.cursor.as_mut().unwrap();
+            cursor.set_position(8);
+            self.len = cursor.read_i16::<LittleEndian>()? as isize;
+            if self.len == 0 {
+                self.len = -1;
+                self.count -= 1;
+            }
+            if self.has_more() {
+                return self.next();
+            }
+        } else {
+            let val = read_zip_list_entry(self.cursor.as_mut().unwrap())?;
+            self.len -= 1;
+            if self.len == 0 {
+                self.len = -1;
+                self.count -= 1;
+            }
+            return Ok(val);
+        }
+        Err(Error::new(ErrorKind::NotFound, "No element left"))
+    }
+}
+
+impl QuickListIter<'_> {
+    fn has_more(&self) -> bool {
+        self.len > 0 || self.count > 0
     }
 }

@@ -1,4 +1,6 @@
-use std::io::Error;
+use std::io::{Error, ErrorKind};
+
+use crate::rdb::Iter;
 
 mod config;
 pub mod listener;
@@ -19,8 +21,8 @@ pub trait RedisListener {
 }
 
 // 定义redis rdb事件的处理接口
-pub trait RdbEventHandler {
-    fn handle(&self, key: &Vec<u8>, values: &Vec<Vec<u8>>, obj_type: u8);
+pub trait RdbHandler {
+    fn handle(&self, key: &Vec<u8>, values: &mut dyn Iter, obj_type: u8);
 }
 
 // 定义redis命令的处理接口
@@ -30,11 +32,20 @@ pub trait CommandHandler {
 
 pub struct EchoRdbHandler {}
 
-impl RdbEventHandler for EchoRdbHandler {
-    fn handle(&self, key: &Vec<u8>, values: &Vec<Vec<u8>>, obj_type: u8) {
+impl RdbHandler for EchoRdbHandler {
+    fn handle(&self, key: &Vec<u8>, values: &mut dyn Iter, obj_type: u8) {
         print!("[{:?}] {}: ", obj_type, String::from_utf8(key.to_vec()).unwrap());
-        for x in values {
-            print!("{} ", String::from_utf8((x).to_vec()).unwrap());
+        loop {
+            match values.next() {
+                Ok(val) => {
+                    print!("{} ", String::from_utf8(val).unwrap());
+                }
+                Err(ref err) if err.kind() == ErrorKind::NotFound => break,
+                Err(err) => {
+                    println!("error: {}", err);
+                    break;
+                }
+            }
         }
         println!();
     }

@@ -7,7 +7,7 @@ pub mod standalone {
     use std::thread;
     use std::time::{Duration, Instant};
     
-    use crate::{CommandHandler, config, rdb, RdbEventHandler, RedisListener};
+    use crate::{CommandHandler, config, rdb, RdbHandler, RedisListener};
     use crate::config::Config;
     use crate::listener::standalone::SyncMode::PSync;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
@@ -22,7 +22,7 @@ pub mod standalone {
         reader: Option<Reader>,
         repl_id: String,
         repl_offset: i64,
-        rdb_listeners: Vec<Box<dyn RdbEventHandler>>,
+        rdb_listeners: Vec<Box<dyn RdbHandler>>,
         cmd_listeners: Vec<Box<dyn CommandHandler>>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
@@ -91,7 +91,7 @@ pub mod standalone {
             Ok(())
         }
         
-        fn response(&mut self, func: fn(&mut Reader, isize, &Vec<Box<dyn RdbEventHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
+        fn response(&mut self, func: fn(&mut Reader, isize, &Vec<Box<dyn RdbHandler>>, &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error>)
                     -> Result<Data<Vec<u8>, Vec<Vec<u8>>>, Error> {
             let socket = self.reader.as_mut().unwrap();
             let response_type = socket.read_u8()?;
@@ -183,7 +183,7 @@ pub mod standalone {
             Ok(Empty)
         }
         
-        pub fn add_rdb_listener(&mut self, listener: Box<dyn RdbEventHandler>) {
+        pub fn add_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
             self.rdb_listeners.push(listener)
         }
         
