@@ -1,9 +1,10 @@
 use std::io::{Error, ErrorKind};
 
-use crate::rdb::Iter;
+use crate::iter::Iter;
 
 mod config;
 pub mod listener;
+pub mod iter;
 mod lzf;
 mod rdb;
 mod reader;
