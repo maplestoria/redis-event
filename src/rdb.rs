@@ -197,7 +197,6 @@ pub(crate) fn parse(input: &mut Reader,
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-    
                 let _type;
                 if data_type == RDB_TYPE_HASH_ZIPLIST {
                     _type = OBJ_HASH;
@@ -206,7 +205,6 @@ pub(crate) fn parse(input: &mut Reader,
                 } else {
                     _type = OBJ_LIST;
                 }
-    
                 rdb_handlers.iter().for_each(|handler|
                     handler.handle(&key, &mut iter, _type)
                 );
@@ -223,7 +221,6 @@ pub(crate) fn parse(input: &mut Reader,
                 let key = read_string(input)?;
                 let (count, _) = read_length(input)?;
                 let mut iter = StrValIter { count, input };
-                
                 let _type;
                 if data_type == RDB_TYPE_LIST {
                     _type = OBJ_LIST;
@@ -257,29 +254,11 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_TYPE_HASH_ZIPMAP => {
                 let key = read_string(input)?;
                 let bytes = read_string(input)?;
-                let mut values = Vec::new();
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
-                loop {
-                    let zm_len = read_zm_len(cursor)?;
-                    if zm_len == 255 {
-                        break;
-                    }
-                    let mut field = Vec::with_capacity(zm_len as usize);
-                    cursor.read_exact(&mut field)?;
-                    values.push(field);
-                    let zm_len = read_zm_len(cursor)?;
-                    if zm_len == 255 {
-                        values.push([].to_vec());
-                        break;
-                    }
-                    let free = cursor.read_i8()?;
-                    let mut value = Vec::with_capacity(zm_len as usize);
-                    cursor.read_exact(&mut value)?;
-                    cursor.set_position(cursor.position() + free as u64);
-                    values.push(value);
-                }
-                // TODO
+                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_HASH));
             }
             RDB_TYPE_SET_INTSET => {
                 let key = read_string(input)?;
@@ -333,7 +312,8 @@ pub(crate) fn read_bytes(input: &mut Reader, length: isize, _: &Vec<Box<dyn RdbH
         if end == b"\r\n" {
             return Ok(Bytes(bytes));
         } else {
-            return Err(Error::new(ErrorKind::Other, "Expect CRLF after bulk string"));
+            let err = format!("Expect CRLF after bulk string, but got: {:?}", end);
+            return Err(Error::new(ErrorKind::Other, err));
         }
     } else if length == 0 {
         // length == 0 代表空字符，后面还有CRLF
@@ -628,5 +608,41 @@ impl Iter for SortedSetIter<'_> {
             return Ok(val);
         }
         Err(Error::new(ErrorKind::NotFound, "No element left"))
+    }
+}
+
+/// HashZipMap的值迭代器
+struct ZipMapIter<'a> {
+    has_more: bool,
+    read_val: bool,
+    cursor: &'a mut Cursor<&'a Vec<u8>>,
+}
+
+impl Iter for ZipMapIter<'_> {
+    fn next(&mut self) -> Result<Vec<u8>, Error> {
+        if !self.has_more {
+            return Err(Error::new(ErrorKind::NotFound, "No element left"));
+        }
+        if self.read_val {
+            let zm_len = read_zm_len(self.cursor)?;
+            if zm_len == 255 {
+                self.has_more = false;
+                return Ok(Vec::new());
+            }
+            let free = self.cursor.read_i8()?;
+            let mut value = Vec::with_capacity(zm_len as usize);
+            self.cursor.read_exact(&mut value)?;
+            self.cursor.set_position(self.cursor.position() + free as u64);
+            return Ok(value);
+        } else {
+            let zm_len = read_zm_len(self.cursor)?;
+            if zm_len == 255 {
+                self.has_more = false;
+                return Err(Error::new(ErrorKind::NotFound, "No element left"));
+            }
+            let mut field = Vec::with_capacity(zm_len as usize);
+            self.cursor.read_exact(&mut field)?;
+            return Ok(field);
+        }
     }
 }
