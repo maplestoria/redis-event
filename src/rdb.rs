@@ -114,9 +114,12 @@ pub(crate) fn parse(input: &mut Reader,
                 let (db, _) = input.read_length()?;
                 println!("db expired keys: {}", db);
             }
-            RDB_OPCODE_EXPIRETIME => {}
-            RDB_OPCODE_EXPIRETIME_MS => {
-                let expire_times = input.read_integer(8, false)?;
+            RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
+                if data_type == RDB_OPCODE_EXPIRETIME_MS {
+                    input.read_integer(8, false)?;
+                } else {
+                    input.read_integer(4, false)?;
+                }
                 let value_type = input.read_u8()?;
                 match value_type {
                     RDB_OPCODE_FREQ => {
@@ -135,10 +138,14 @@ pub(crate) fn parse(input: &mut Reader,
                 }
             }
             RDB_OPCODE_FREQ => {
-                // TODO
+                input.read_u8()?;
+                let value_type = input.read_u8()?;
+                input.read_object(value_type, rdb_handlers)?;
             }
             RDB_OPCODE_IDLE => {
-                // TODO
+                input.read_length()?;
+                let value_type = input.read_u8()?;
+                input.read_object(value_type, rdb_handlers)?;
             }
             RDB_OPCODE_MODULE_AUX => {
                 // TODO
