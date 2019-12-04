@@ -2,8 +2,7 @@ use std::io::{Cursor, Error, ErrorKind, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbHandler};
-use crate::iter::{IntSetIter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
+use crate::{CommandHandler, RdbHandler};
 use crate::rdb::Data::{Bytes, Empty};
 use crate::reader::Reader;
 
@@ -23,27 +22,27 @@ pub(crate) const COLON: u8 = b':';
 
 /// Map object types to RDB object types.
 ///
-const RDB_TYPE_STRING: u8 = 0;
-const RDB_TYPE_LIST: u8 = 1;
-const RDB_TYPE_SET: u8 = 2;
-const RDB_TYPE_ZSET: u8 = 3;
-const RDB_TYPE_HASH: u8 = 4;
+pub(crate) const RDB_TYPE_STRING: u8 = 0;
+pub(crate) const RDB_TYPE_LIST: u8 = 1;
+pub(crate) const RDB_TYPE_SET: u8 = 2;
+pub(crate) const RDB_TYPE_ZSET: u8 = 3;
+pub(crate) const RDB_TYPE_HASH: u8 = 4;
 /// ZSET version 2 with doubles stored in binary.
-const RDB_TYPE_ZSET_2: u8 = 5;
-const RDB_TYPE_MODULE: u8 = 6;
+pub(crate) const RDB_TYPE_ZSET_2: u8 = 5;
+pub(crate) const RDB_TYPE_MODULE: u8 = 6;
 /// Module value with annotations for parsing without
 /// the generating module being loaded.
-const RDB_TYPE_MODULE_2: u8 = 7;
+pub(crate) const RDB_TYPE_MODULE_2: u8 = 7;
 
 /// Object types for encoded objects.
 ///
-const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
-const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
-const RDB_TYPE_SET_INTSET: u8 = 11;
-const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
-const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
-const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
-const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
+pub(crate) const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
+pub(crate) const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
+pub(crate) const RDB_TYPE_SET_INTSET: u8 = 11;
+pub(crate) const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
+pub(crate) const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
+pub(crate) const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
+pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
 
 /// Special RDB opcodes
 ///
@@ -118,15 +117,21 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_OPCODE_EXPIRETIME => {}
             RDB_OPCODE_EXPIRETIME_MS => {
                 let expire_times = input.read_integer(8, false)?;
-                let _type = input.read_u8()?;
-                match _type {
+                let value_type = input.read_u8()?;
+                match value_type {
                     RDB_OPCODE_FREQ => {
-                        let frq = input.read_u8()?;
+                        input.read_u8()?;
                         let value_type = input.read_u8()?;
+                        input.read_object(value_type, rdb_handlers)?;
                     }
-                    RDB_OPCODE_IDLE => {}
-                    _ => {}
-                    // TODO
+                    RDB_OPCODE_IDLE => {
+                        input.read_length()?;
+                        let value_type = input.read_u8()?;
+                        input.read_object(value_type, rdb_handlers)?;
+                    }
+                    _ => {
+                        input.read_object(value_type, rdb_handlers)?;
+                    }
                 }
             }
             RDB_OPCODE_FREQ => {
@@ -138,110 +143,15 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_OPCODE_MODULE_AUX => {
                 // TODO
             }
-            RDB_TYPE_MODULE => {
-                // TODO
-            }
-            RDB_TYPE_MODULE_2 => {
-                // TODO
-            }
-            RDB_TYPE_STREAM_LISTPACKS => {
-                // TODO
-            }
-            RDB_TYPE_STRING => {
-                let key = input.read_string()?;
-                let mut iter = StrValIter { count: 1, input };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_STRING)
-                );
-            }
-            RDB_TYPE_HASH_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST | RDB_TYPE_LIST_ZIPLIST => {
-                let key = input.read_string()?;
-                let bytes = input.read_string()?;
-                let cursor = &mut Cursor::new(bytes);
-                // 跳过ZL_BYTES和ZL_TAIL
-                cursor.set_position(8);
-                let count = cursor.read_u16::<LittleEndian>()? as isize;
-                let mut iter = ZipListIter { count, cursor };
-                let _type;
-                if data_type == RDB_TYPE_HASH_ZIPLIST {
-                    _type = OBJ_HASH;
-                } else if data_type == RDB_TYPE_ZSET_ZIPLIST {
-                    _type = OBJ_ZSET;
-                } else {
-                    _type = OBJ_LIST;
-                }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, _type)
-                );
-            }
-            RDB_TYPE_LIST_QUICKLIST => {
-                let key = input.read_string()?;
-                let (count, _) = input.read_length()?;
-                let mut iter = QuickListIter { len: -1, count, input, cursor: Option::None };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_LIST)
-                );
-            }
-            RDB_TYPE_LIST | RDB_TYPE_SET => {
-                let key = input.read_string()?;
-                let (count, _) = input.read_length()?;
-                let mut iter = StrValIter { count, input };
-                let _type;
-                if data_type == RDB_TYPE_LIST {
-                    _type = OBJ_LIST;
-                } else {
-                    _type = OBJ_SET;
-                }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, _type));
-            }
-            RDB_TYPE_ZSET => {
-                let key = input.read_string()?;
-                let (count, _) = input.read_length()?;
-                let mut iter = SortedSetIter { count, v: 1, read_score: false, input };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_ZSET));
-            }
-            RDB_TYPE_ZSET_2 => {
-                let key = input.read_string()?;
-                let (count, _) = input.read_length()?;
-                let mut iter = SortedSetIter { count, v: 2, read_score: false, input };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_ZSET));
-            }
-            RDB_TYPE_HASH => {
-                let key = input.read_string()?;
-                let (count, _) = input.read_length()?;
-                let mut iter = StrValIter { count, input };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_HASH));
-            }
-            RDB_TYPE_HASH_ZIPMAP => {
-                let key = input.read_string()?;
-                let bytes = input.read_string()?;
-                let cursor = &mut Cursor::new(&bytes);
-                cursor.set_position(1);
-                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_HASH));
-            }
-            RDB_TYPE_SET_INTSET => {
-                let key = input.read_string()?;
-                let bytes = input.read_string()?;
-                let mut cursor = Cursor::new(&bytes);
-                let encoding = cursor.read_i32::<LittleEndian>()?;
-                let length = cursor.read_u32::<LittleEndian>()?;
-                let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_SET));
-            }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
                     input.read_integer(8, true)?;
                 }
                 break;
             }
-            _ => break
+            _ => {
+                input.read_object(data_type, rdb_handlers)?;
+            }
         };
     };
     Ok(Empty)

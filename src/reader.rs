@@ -4,7 +4,9 @@ use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::lzf;
+use crate::{lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbHandler};
+use crate::iter::{IntSetIter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
+use crate::rdb::*;
 
 /// Defines related to the dump file format. To store 32 bits lengths for short
 /// keys requires a lot of space, so we check the most significant 2 bits of
@@ -200,5 +202,113 @@ impl Reader {
                 return Ok(buff);
             }
         }
+    }
+    
+    // 根据传入的数据类型，从流中读取对应类型的数据
+    pub(crate) fn read_object(&mut self, value_type: u8, rdb_handlers: &Vec<Box<dyn RdbHandler>>) -> Result<()> {
+        match value_type {
+            RDB_TYPE_STRING => {
+                let key = self.read_string()?;
+                let mut iter = StrValIter { count: 1, input: self };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_STRING)
+                );
+            }
+            RDB_TYPE_LIST | RDB_TYPE_SET => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = StrValIter { count, input: self };
+                let _type;
+                if value_type == RDB_TYPE_LIST {
+                    _type = OBJ_LIST;
+                } else {
+                    _type = OBJ_SET;
+                }
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, _type));
+            }
+            RDB_TYPE_ZSET => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = SortedSetIter { count, v: 1, read_score: false, input: self };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_ZSET));
+            }
+            RDB_TYPE_ZSET_2 => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = SortedSetIter { count, v: 2, read_score: false, input: self };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_ZSET));
+            }
+            RDB_TYPE_HASH => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = StrValIter { count, input: self };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_HASH));
+            }
+            RDB_TYPE_HASH_ZIPMAP => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(&bytes);
+                cursor.set_position(1);
+                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_HASH));
+            }
+            RDB_TYPE_LIST_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST | RDB_TYPE_HASH_ZIPLIST => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+                let _type;
+                if value_type == RDB_TYPE_HASH_ZIPLIST {
+                    _type = OBJ_HASH;
+                } else if value_type == RDB_TYPE_ZSET_ZIPLIST {
+                    _type = OBJ_ZSET;
+                } else {
+                    _type = OBJ_LIST;
+                }
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, _type)
+                );
+            }
+            RDB_TYPE_SET_INTSET => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let mut cursor = Cursor::new(&bytes);
+                let encoding = cursor.read_i32::<LittleEndian>()?;
+                let length = cursor.read_u32::<LittleEndian>()?;
+                let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_SET));
+            }
+            RDB_TYPE_LIST_QUICKLIST => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = QuickListIter { len: -1, count, input: self, cursor: Option::None };
+                rdb_handlers.iter().for_each(|handler|
+                    handler.handle(&key, &mut iter, OBJ_LIST)
+                );
+            }
+            RDB_TYPE_MODULE => {
+                // TODO
+            }
+            RDB_TYPE_MODULE_2 => {
+                // TODO
+            }
+            RDB_TYPE_STREAM_LISTPACKS => {
+                // TODO
+            }
+            _ => {
+                let err = format!("unknown data type: {}", value_type);
+                return Err(Error::new(ErrorKind::InvalidData, err));
+            }
+        }
+        Ok(())
     }
 }

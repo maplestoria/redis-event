@@ -268,7 +268,15 @@ pub mod standalone {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => return Err(Error::new(ErrorKind::InvalidData, "Expect BytesVec response, but got Bytes")),
                     Ok(Data::BytesVec(cmd)) => {
-                        println!("cmd: {:?}", cmd);
+                        for x in cmd {
+                            let string = String::from_utf8(x.clone());
+                            if let Ok(string) = string {
+                                print!("{} ", string);
+                            } else {
+                                println!("{:?}", x);
+                            }
+                        }
+                        println!();
                     }
                     Err(err) => return Err(err),
                     Ok(Empty) => {}
