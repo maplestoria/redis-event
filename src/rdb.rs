@@ -254,3 +254,11 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
         }
     }
 }
+
+pub enum Object<'a> {
+    String(&'a str, &'a str),
+    List(&'a str, &'a Vec<Vec<u8>>),
+    Set(&'a str, &'a Vec<Vec<u8>>),
+    SortedSet(&'a str, &'a Vec<Vec<u8>>),
+    Hash(&'a str, &'a Vec<Vec<u8>>),
+}

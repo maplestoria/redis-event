@@ -1,6 +1,7 @@
 use std::io::{Error, ErrorKind};
 
 use crate::iter::Iter;
+use crate::rdb::Object;
 
 mod config;
 pub mod listener;
@@ -23,7 +24,7 @@ pub trait RedisListener {
 
 // 定义redis rdb事件的处理接口
 pub trait RdbHandler {
-    fn handle(&self, key: &Vec<u8>, values: &mut dyn Iter, obj_type: u8);
+    fn handle(&self, data: &Object);
 }
 
 // 定义redis命令的处理接口
@@ -34,21 +35,69 @@ pub trait CommandHandler {
 pub struct EchoRdbHandler {}
 
 impl RdbHandler for EchoRdbHandler {
-    fn handle(&self, key: &Vec<u8>, values: &mut dyn Iter, obj_type: u8) {
-        print!("[{:?}] {}: ", obj_type, String::from_utf8(key.to_vec()).unwrap());
-        loop {
-            match values.next() {
-                Ok(val) => {
-                    print!("{} ", String::from_utf8(val).unwrap());
+    fn handle(&self, data: &Object) {
+        match data {
+            Object::String(key, val) => {
+                println!("{}={}", key, val);
+            }
+            Object::List(key, val) => {
+                print!("{}=[ ", key);
+                for x in val.iter() {
+                    print!("{} ", String::from_utf8(x.clone()).unwrap());
                 }
-                Err(ref err) if err.kind() == ErrorKind::NotFound => break,
-                Err(err) => {
-                    println!("error: {}", err);
-                    break;
+                print!("]\r\n");
+            }
+            Object::Set(key, val) => {
+                print!("{}=[ ", key);
+                for x in val.iter() {
+                    print!("{} ", String::from_utf8(x.clone()).unwrap());
                 }
+                print!("]\r\n");
+            }
+            Object::SortedSet(key, val) => {
+                print!("{}=[ ", key);
+                let mut iter = val.iter();
+    
+                loop {
+                    let ele;
+                    let sc;
+                    if let Some(element) = iter.next() {
+                        ele = String::from_utf8(element.clone()).unwrap();
+                    } else {
+                        break;
+                    }
+                    if let Some(score) = iter.next() {
+                        sc = String::from_utf8(score.clone()).unwrap();
+                    } else {
+                        panic!("lack score of element")
+                    }
+                    print!(" {}-{} ", ele, sc);
+                }
+                
+                print!("]\r\n");
+            }
+            Object::Hash(key, val) => {
+                print!("{}=[ ", key);
+                let mut iter = val.iter();
+    
+                loop {
+                    let field;
+                    let val;
+                    if let Some(element) = iter.next() {
+                        field = String::from_utf8(element.clone()).unwrap();
+                    } else {
+                        break;
+                    }
+                    if let Some(element) = iter.next() {
+                        val = String::from_utf8(element.clone()).unwrap();
+                    } else {
+                        panic!("lack val of field")
+                    }
+                    print!(" {}={} ", field, val);
+                }
+                print!("]\r\n");
             }
         }
-        println!();
     }
 }
 
