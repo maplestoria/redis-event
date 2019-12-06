@@ -6,7 +6,7 @@ pub mod standalone {
     use std::thread;
     use std::time::{Duration, Instant};
     
-    use crate::{CommandHandler, config, rdb, RdbHandler, RedisListener};
+    use crate::{cmd, CommandHandler, config, rdb, RdbHandler, RedisListener};
     use crate::config::Config;
     use crate::listener::standalone::SyncMode::PSync;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
@@ -34,7 +34,7 @@ pub mod standalone {
             let stream_boxed = Box::new(stream.try_clone());
             let stream = Box::new(stream);
             let (sender, receiver) = mpsc::channel();
-        
+    
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 let output = stream_boxed.as_ref().as_ref().unwrap();
@@ -267,16 +267,8 @@ pub mod standalone {
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => return Err(Error::new(ErrorKind::InvalidData, "Expect BytesVec response, but got Bytes")),
-                    Ok(Data::BytesVec(cmd)) => {
-                        for x in cmd {
-                            let string = String::from_utf8(x.clone());
-                            if let Ok(string) = string {
-                                print!("{} ", string);
-                            } else {
-                                println!("{:?}", x);
-                            }
-                        }
-                        println!();
+                    Ok(Data::BytesVec(data)) => {
+                        cmd::parse(data, &self.cmd_listeners)?;
                     }
                     Err(err) => return Err(err),
                     Ok(Empty) => {}

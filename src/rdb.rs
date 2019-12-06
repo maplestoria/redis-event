@@ -3,6 +3,7 @@ use std::io::{Cursor, Error, ErrorKind, Read, Result};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::{CommandHandler, RdbHandler};
+use crate::cmd::Command;
 use crate::rdb::Data::{Bytes, Empty};
 use crate::reader::Reader;
 
@@ -106,7 +107,8 @@ pub(crate) fn parse(input: &mut Reader,
             }
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
-                println!("db: {}", db);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(&Command::SELECT(db as u8)));
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;
@@ -255,10 +257,25 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
     }
 }
 
+/// Redis中的各个数据类型
 pub enum Object<'a> {
+    /// String:
+    ///   左边是key, 右边是value
     String(&'a str, &'a str),
+    
+    /// List:
+    ///   左边是key, 右边是values
     List(&'a str, &'a Vec<String>),
+    
+    /// Set:
+    ///   左边是key, 右边是values
     Set(&'a str, &'a Vec<String>),
+    
+    /// SortedSet:
+    ///   左边是key, 右边是值的形式为(member, score)的vec
     SortedSet(&'a str, &'a Vec<(String, f64)>),
+    
+    /// Hash:
+    ///   左边是key, 右边是值的形式为(field, value)的vec
     Hash(&'a str, &'a Vec<(String, String)>),
 }

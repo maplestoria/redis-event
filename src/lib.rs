@@ -1,10 +1,12 @@
 use std::io::Error;
 
+use crate::cmd::Command;
 use crate::rdb::Object;
 
+pub mod cmd;
 mod config;
 pub mod listener;
-pub mod iter;
+mod iter;
 mod lzf;
 mod rdb;
 mod reader;
@@ -66,4 +68,20 @@ impl RdbHandler for EchoRdbHandler {
     }
 }
 
-pub struct Command {}
+pub struct EchoCmdHandler {}
+
+impl CommandHandler for EchoCmdHandler {
+    fn handle(&self, cmd: &Command) {
+        match cmd {
+            Command::SET(set) => {
+                println!("{:?}", set);
+            }
+            Command::PING => {
+                println!("PING");
+            }
+            Command::SELECT(db) => {
+                println!("SELECT DB: {}", db);
+            }
+        }
+    }
+}
