@@ -185,22 +185,24 @@ impl Reader {
     }
     
     // 从流中读取一个double
-    pub(crate) fn read_double(&mut self) -> Result<Vec<u8>> {
+    pub(crate) fn read_double(&mut self) -> Result<f64> {
         let len = self.read_u8()?;
         match len {
             255 => {
-                return Ok(NEG_INFINITY.to_string().into_bytes());
+                return Ok(NEG_INFINITY);
             }
             254 => {
-                return Ok(INFINITY.to_string().into_bytes());
+                return Ok(INFINITY);
             }
             253 => {
-                return Ok(NAN.to_string().into_bytes());
+                return Ok(NAN);
             }
             _ => {
                 let mut buff = Vec::with_capacity(len as usize);
                 self.read_exact(&mut buff)?;
-                return Ok(buff);
+                let score_str = String::from_utf8(buff).unwrap();
+                let score = score_str.parse::<f64>().unwrap();
+                return Ok(score);
             }
         }
     }
@@ -248,12 +250,11 @@ impl Reader {
                 let key = self.read_string()?;
                 let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 1, read_score: false, input: self };
+                let mut iter = SortedSetIter { count, v: 1, input: self };
                 
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
-    
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
                             val.push(next_val);
@@ -270,12 +271,11 @@ impl Reader {
                 let key = self.read_string()?;
                 let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 2, read_score: false, input: self };
+                let mut iter = SortedSetIter { count, v: 2, input: self };
                 
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
-    
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
                             val.push(next_val);
@@ -357,7 +357,7 @@ impl Reader {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-        
+    
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -383,7 +383,7 @@ impl Reader {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-        
+    
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -416,13 +416,22 @@ impl Reader {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-        
+    
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
+                        let element;
+                        let score: f64;
                         if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
+                            element = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                let score_str = String::from_utf8(next_val).unwrap();
+                                score = score_str.parse::<f64>().unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((element, score));
                         } else {
                             has_more = false;
                             break;

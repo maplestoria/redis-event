@@ -35,53 +35,32 @@ pub struct EchoRdbHandler {}
 
 impl RdbHandler for EchoRdbHandler {
     fn handle(&self, data: &Object) {
+        // 打印的格式不咋样, 将就看吧
         match data {
             Object::String(key, val) => {
                 println!("{}={}", key, val);
             }
             Object::List(key, val) => {
-                print!("{}=[ ", key);
-                for x in val.iter() {
-                    print!("{} ", x);
-                }
-                print!("]\r\n");
+                let values = val.join(", ");
+                println!("{}=[ {} ]\r", key, values);
             }
             Object::Set(key, val) => {
-                print!("{}=[ ", key);
-                for x in val.iter() {
-                    print!("{} ", x);
-                }
-                print!("]\r\n");
+                let values = val.join(", ");
+                println!("{}=[ {} ]\r", key, values);
             }
             Object::SortedSet(key, val) => {
-                print!("{}=[ ", key);
-                let mut iter = val.iter();
-    
-                loop {
-                    let ele;
-                    let sc;
-                    if let Some(element) = iter.next() {
-                        ele = String::from_utf8(element.clone()).unwrap();
-                    } else {
-                        break;
-                    }
-                    if let Some(score) = iter.next() {
-                        sc = String::from_utf8(score.clone()).unwrap();
-                    } else {
-                        panic!("lack score of element")
-                    }
-                    print!(" {}-{} ", ele, sc);
+                print!("{}=[", key);
+                for (element, score) in val.iter() {
+                    print!("{}:{} ", element, score);
                 }
-                
-                print!("]\r\n");
+                println!("]");
             }
             Object::Hash(key, val) => {
                 print!("{}=[ ", key);
-                let mut iter = val.iter();
-                while let Some((key, value)) = iter.next() {
-                    print!(" {}={} ", key, value);
+                for (field, value) in val.iter() {
+                    print!("{}:{} ", field, value);
                 }
-                print!("]\r\n");
+                println!("]");
             }
         }
     }

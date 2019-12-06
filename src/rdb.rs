@@ -259,6 +259,6 @@ pub enum Object<'a> {
     String(&'a str, &'a str),
     List(&'a str, &'a Vec<String>),
     Set(&'a str, &'a Vec<String>),
-    SortedSet(&'a str, &'a Vec<Vec<u8>>),
+    SortedSet(&'a str, &'a Vec<(String, f64)>),
     Hash(&'a str, &'a Vec<(String, String)>),
 }
