@@ -108,7 +108,7 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
                 cmd_handler.iter().for_each(|handler|
-                    handler.handle(&Command::SELECT(db as u8)));
+                    handler.handle(Command::SELECT(db as u8)));
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;

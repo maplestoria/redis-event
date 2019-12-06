@@ -25,18 +25,18 @@ pub trait RedisListener {
 
 // 定义redis rdb事件的处理接口
 pub trait RdbHandler {
-    fn handle(&self, data: &Object);
+    fn handle(&self, data: Object);
 }
 
 // 定义redis命令的处理接口
 pub trait CommandHandler {
-    fn handle(&self, c: &Command);
+    fn handle(&self, cmd: Command);
 }
 
 pub struct EchoRdbHandler {}
 
 impl RdbHandler for EchoRdbHandler {
-    fn handle(&self, data: &Object) {
+    fn handle(&self, data: Object) {
         // 打印的格式不咋样, 将就看吧
         match data {
             Object::String(key, val) => {
@@ -71,7 +71,7 @@ impl RdbHandler for EchoRdbHandler {
 pub struct EchoCmdHandler {}
 
 impl CommandHandler for EchoCmdHandler {
-    fn handle(&self, cmd: &Command) {
+    fn handle(&self, cmd: Command) {
         match cmd {
             Command::SET(set) => {
                 println!("{:?}", set);

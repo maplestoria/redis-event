@@ -216,7 +216,7 @@ impl Reader {
                 let val = self.read_string()?;
                 let val = String::from_utf8(val).unwrap();
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&Object::String(&key, &val))
+                    handler.handle(Object::String(&key, &val))
                 );
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
@@ -239,10 +239,10 @@ impl Reader {
                     }
                     if value_type == RDB_TYPE_LIST {
                         rdb_handlers.iter().for_each(|handler|
-                            handler.handle(&Object::List(&key, &val)));
+                            handler.handle(Object::List(&key, &val)));
                     } else {
                         rdb_handlers.iter().for_each(|handler|
-                            handler.handle(&Object::Set(&key, &val)));
+                            handler.handle(Object::Set(&key, &val)));
                     }
                 }
             }
@@ -264,7 +264,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::SortedSet(&key, &val)));
+                        handler.handle(Object::SortedSet(&key, &val)));
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -285,7 +285,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::SortedSet(&key, &val)));
+                        handler.handle(Object::SortedSet(&key, &val)));
                 }
             }
             RDB_TYPE_HASH => {
@@ -314,7 +314,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::Hash(&key, &val)));
+                        handler.handle(Object::Hash(&key, &val)));
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -345,7 +345,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::Hash(&key, &val)));
+                        handler.handle(Object::Hash(&key, &val)));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
@@ -371,7 +371,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::List(&key, &val)));
+                        handler.handle(Object::List(&key, &val)));
                 }
             }
             RDB_TYPE_HASH_ZIPLIST => {
@@ -404,7 +404,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::Hash(&key, &val)));
+                        handler.handle(Object::Hash(&key, &val)));
                 }
             }
             RDB_TYPE_ZSET_ZIPLIST => {
@@ -438,7 +438,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::SortedSet(&key, &val)));
+                        handler.handle(Object::SortedSet(&key, &val)));
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -463,7 +463,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::Set(&key, &val)));
+                        handler.handle(Object::Set(&key, &val)));
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
@@ -485,7 +485,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::List(&key, &val)));
+                        handler.handle(Object::List(&key, &val)));
                 }
             }
             RDB_TYPE_MODULE => {

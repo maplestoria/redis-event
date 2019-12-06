@@ -19,12 +19,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
             "SET" => {
                 let cmd = set::parse_set(iter)?;
                 cmd_handler.iter().for_each(|handler|
-                    handler.handle(&Command::SET(&cmd))
+                    handler.handle(Command::SET(&cmd))
                 );
             }
             "PING" => {
                 cmd_handler.iter().for_each(|handler|
-                    handler.handle(&Command::PING)
+                    handler.handle(Command::PING)
                 );
             }
             _ => {}
