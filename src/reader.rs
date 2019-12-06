@@ -223,11 +223,12 @@ impl Reader {
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -241,10 +242,6 @@ impl Reader {
                         rdb_handlers.iter().for_each(|handler|
                             handler.handle(&Object::Set(&key, &val)));
                     }
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
                 }
             }
             RDB_TYPE_ZSET => {
@@ -253,9 +250,10 @@ impl Reader {
                 let (count, _) = self.read_length()?;
                 let mut iter = SortedSetIter { count, v: 1, read_score: false, input: self };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
+    
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
                             val.push(next_val);
@@ -266,10 +264,6 @@ impl Reader {
                     }
                     rdb_handlers.iter().for_each(|handler|
                         handler.handle(&Object::SortedSet(&key, &val)));
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -278,9 +272,10 @@ impl Reader {
                 let (count, _) = self.read_length()?;
                 let mut iter = SortedSetIter { count, v: 2, read_score: false, input: self };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
+    
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
                             val.push(next_val);
@@ -291,10 +286,6 @@ impl Reader {
                     }
                     rdb_handlers.iter().for_each(|handler|
                         handler.handle(&Object::SortedSet(&key, &val)));
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
                 }
             }
             RDB_TYPE_HASH => {
@@ -303,12 +294,20 @@ impl Reader {
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
+                        let field;
+                        let field_val;
                         if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
+                            field = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                field_val = String::from_utf8(next_val).unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((field, field_val));
                         } else {
                             has_more = false;
                             break;
@@ -316,10 +315,6 @@ impl Reader {
                     }
                     rdb_handlers.iter().for_each(|handler|
                         handler.handle(&Object::Hash(&key, &val)));
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -330,9 +325,101 @@ impl Reader {
                 cursor.set_position(1);
                 let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let field;
+                        let field_val;
+                        if let Ok(next_val) = iter.next() {
+                            field = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                field_val = String::from_utf8(next_val).unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((field, field_val));
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::Hash(&key, &val)));
+                }
+            }
+            RDB_TYPE_LIST_ZIPLIST => {
+                let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::List(&key, &val)));
+                }
+            }
+            RDB_TYPE_HASH_ZIPLIST => {
+                let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let field;
+                        let field_val;
+                        if let Ok(next_val) = iter.next() {
+                            field = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                field_val = String::from_utf8(next_val).unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((field, field_val));
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::Hash(&key, &val)));
+                }
+            }
+            RDB_TYPE_ZSET_ZIPLIST => {
+                let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
                             val.push(next_val);
@@ -342,48 +429,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(&Object::Hash(&key, &val)));
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
-                }
-            }
-            RDB_TYPE_LIST_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST | RDB_TYPE_HASH_ZIPLIST => {
-                let key = self.read_string()?;
-                let key = String::from_utf8(key).unwrap();
-                let bytes = self.read_string()?;
-                let cursor = &mut Cursor::new(bytes);
-                // 跳过ZL_BYTES和ZL_TAIL
-                cursor.set_position(8);
-                let count = cursor.read_u16::<LittleEndian>()? as isize;
-                let mut iter = ZipListIter { count, cursor };
-                
-                let mut val = Vec::with_capacity(BATCH_SIZE);
-                let mut has_more = true;
-                while has_more {
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    
-                    if value_type == RDB_TYPE_HASH_ZIPLIST {
-                        rdb_handlers.iter().for_each(|handler|
-                            handler.handle(&Object::Hash(&key, &val)));
-                    } else if value_type == RDB_TYPE_ZSET_ZIPLIST {
-                        rdb_handlers.iter().for_each(|handler|
-                            handler.handle(&Object::SortedSet(&key, &val)));
-                    } else {
-                        rdb_handlers.iter().for_each(|handler|
-                            handler.handle(&Object::List(&key, &val)));
-                    }
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
+                        handler.handle(&Object::SortedSet(&key, &val)));
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -395,11 +441,12 @@ impl Reader {
                 let length = cursor.read_u32::<LittleEndian>()?;
                 let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -408,10 +455,6 @@ impl Reader {
                     }
                     rdb_handlers.iter().for_each(|handler|
                         handler.handle(&Object::Set(&key, &val)));
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
@@ -420,11 +463,12 @@ impl Reader {
                 let (count, _) = self.read_length()?;
                 let mut iter = QuickListIter { len: -1, count, input: self, cursor: Option::None };
                 
-                let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
                 while has_more {
+                    let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -433,10 +477,6 @@ impl Reader {
                     }
                     rdb_handlers.iter().for_each(|handler|
                         handler.handle(&Object::List(&key, &val)));
-                    
-                    if has_more && val.len() > 0 {
-                        val.clear();
-                    }
                 }
             }
             RDB_TYPE_MODULE => {

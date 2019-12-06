@@ -42,14 +42,14 @@ impl RdbHandler for EchoRdbHandler {
             Object::List(key, val) => {
                 print!("{}=[ ", key);
                 for x in val.iter() {
-                    print!("{} ", String::from_utf8(x.clone()).unwrap());
+                    print!("{} ", x);
                 }
                 print!("]\r\n");
             }
             Object::Set(key, val) => {
                 print!("{}=[ ", key);
                 for x in val.iter() {
-                    print!("{} ", String::from_utf8(x.clone()).unwrap());
+                    print!("{} ", x);
                 }
                 print!("]\r\n");
             }
@@ -78,21 +78,8 @@ impl RdbHandler for EchoRdbHandler {
             Object::Hash(key, val) => {
                 print!("{}=[ ", key);
                 let mut iter = val.iter();
-    
-                loop {
-                    let field;
-                    let val;
-                    if let Some(element) = iter.next() {
-                        field = String::from_utf8(element.clone()).unwrap();
-                    } else {
-                        break;
-                    }
-                    if let Some(element) = iter.next() {
-                        val = String::from_utf8(element.clone()).unwrap();
-                    } else {
-                        panic!("lack val of field")
-                    }
-                    print!(" {}={} ", field, val);
+                while let Some((key, value)) = iter.next() {
+                    print!(" {}={} ", key, value);
                 }
                 print!("]\r\n");
             }
