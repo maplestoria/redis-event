@@ -1,6 +1,5 @@
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
-use crate::iter::Iter;
 use crate::rdb::Object;
 
 mod config;
@@ -102,12 +101,3 @@ impl RdbHandler for EchoRdbHandler {
 }
 
 pub struct Command {}
-
-/// Data types
-pub const OBJ_STRING: u8 = 0;    /* String object. */
-pub const OBJ_LIST: u8 = 1;      /* List object. */
-pub const OBJ_SET: u8 = 2;       /* Set object. */
-pub const OBJ_ZSET: u8 = 3;      /* Sorted set object. */
-pub const OBJ_HASH: u8 = 4;      /* Hash object. */
-pub const OBJ_MODULE: u8 = 5;    /* Module object. */
-pub const OBJ_STREAM: u8 = 6;    /* Stream object. */

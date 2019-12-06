@@ -4,7 +4,7 @@ use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::{lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbHandler};
+use crate::{lzf, RdbHandler};
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::*;
 
@@ -213,7 +213,6 @@ impl Reader {
                 let key = String::from_utf8(key).unwrap();
                 let val = self.read_string()?;
                 let val = String::from_utf8(val).unwrap();
-                let mut iter = StrValIter { count: 1, input: self };
                 rdb_handlers.iter().for_each(|handler|
                     handler.handle(&Object::String(&key, &val))
                 );
@@ -359,14 +358,6 @@ impl Reader {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-                let _type;
-                if value_type == RDB_TYPE_HASH_ZIPLIST {
-                    _type = OBJ_HASH;
-                } else if value_type == RDB_TYPE_ZSET_ZIPLIST {
-                    _type = OBJ_ZSET;
-                } else {
-                    _type = OBJ_LIST;
-                }
                 
                 let mut val = Vec::with_capacity(BATCH_SIZE);
                 let mut has_more = true;
