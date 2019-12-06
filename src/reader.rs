@@ -4,8 +4,8 @@ use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::{lzf, OBJ_HASH, OBJ_LIST, OBJ_SET, OBJ_STRING, OBJ_ZSET, RdbHandler};
-use crate::iter::{IntSetIter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
+use crate::{lzf, RdbHandler};
+use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::*;
 
 /// Defines related to the dump file format. To store 32 bits lengths for short
@@ -40,6 +40,7 @@ const RDB_ENC_INT16: isize = 1;
 const RDB_ENC_INT32: isize = 2;
 /// string compressed with FASTLZ
 const RDB_ENC_LZF: isize = 3;
+const BATCH_SIZE: usize = 64;
 
 pub(crate) struct Reader {
     pub(crate) stream: Box<TcpStream>,
@@ -184,22 +185,24 @@ impl Reader {
     }
     
     // 从流中读取一个double
-    pub(crate) fn read_double(&mut self) -> Result<Vec<u8>> {
+    pub(crate) fn read_double(&mut self) -> Result<f64> {
         let len = self.read_u8()?;
         match len {
             255 => {
-                return Ok(NEG_INFINITY.to_string().into_bytes());
+                return Ok(NEG_INFINITY);
             }
             254 => {
-                return Ok(INFINITY.to_string().into_bytes());
+                return Ok(INFINITY);
             }
             253 => {
-                return Ok(NAN.to_string().into_bytes());
+                return Ok(NAN);
             }
             _ => {
                 let mut buff = Vec::with_capacity(len as usize);
                 self.read_exact(&mut buff)?;
-                return Ok(buff);
+                let score_str = String::from_utf8(buff).unwrap();
+                let score = score_str.parse::<f64>().unwrap();
+                return Ok(score);
             }
         }
     }
@@ -209,91 +212,281 @@ impl Reader {
         match value_type {
             RDB_TYPE_STRING => {
                 let key = self.read_string()?;
-                let mut iter = StrValIter { count: 1, input: self };
+                let key = String::from_utf8(key).unwrap();
+                let val = self.read_string()?;
+                let val = String::from_utf8(val).unwrap();
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_STRING)
+                    handler.handle(&Object::String(&key, &val))
                 );
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
-                let _type;
-                if value_type == RDB_TYPE_LIST {
-                    _type = OBJ_LIST;
-                } else {
-                    _type = OBJ_SET;
+    
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if value_type == RDB_TYPE_LIST {
+                        rdb_handlers.iter().for_each(|handler|
+                            handler.handle(&Object::List(&key, &val)));
+                    } else {
+                        rdb_handlers.iter().for_each(|handler|
+                            handler.handle(&Object::Set(&key, &val)));
+                    }
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, _type));
             }
             RDB_TYPE_ZSET => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 1, read_score: false, input: self };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_ZSET));
+                let mut iter = SortedSetIter { count, v: 1, input: self };
+    
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::SortedSet(&key, &val)));
+                }
             }
             RDB_TYPE_ZSET_2 => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 2, read_score: false, input: self };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_ZSET));
+                let mut iter = SortedSetIter { count, v: 2, input: self };
+    
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::SortedSet(&key, &val)));
+                }
             }
             RDB_TYPE_HASH => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_HASH));
+    
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let field;
+                        let field_val;
+                        if let Ok(next_val) = iter.next() {
+                            field = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                field_val = String::from_utf8(next_val).unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((field, field_val));
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::Hash(&key, &val)));
+                }
             }
             RDB_TYPE_HASH_ZIPMAP => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
                 let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_HASH));
+    
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let field;
+                        let field_val;
+                        if let Ok(next_val) = iter.next() {
+                            field = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                field_val = String::from_utf8(next_val).unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((field, field_val));
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::Hash(&key, &val)));
+                }
             }
-            RDB_TYPE_LIST_ZIPLIST | RDB_TYPE_ZSET_ZIPLIST | RDB_TYPE_HASH_ZIPLIST => {
+            RDB_TYPE_LIST_ZIPLIST => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-                let _type;
-                if value_type == RDB_TYPE_HASH_ZIPLIST {
-                    _type = OBJ_HASH;
-                } else if value_type == RDB_TYPE_ZSET_ZIPLIST {
-                    _type = OBJ_ZSET;
-                } else {
-                    _type = OBJ_LIST;
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::List(&key, &val)));
                 }
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, _type)
-                );
+            }
+            RDB_TYPE_HASH_ZIPLIST => {
+                let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let field;
+                        let field_val;
+                        if let Ok(next_val) = iter.next() {
+                            field = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                field_val = String::from_utf8(next_val).unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((field, field_val));
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::Hash(&key, &val)));
+                }
+            }
+            RDB_TYPE_ZSET_ZIPLIST => {
+                let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let element;
+                        let score: f64;
+                        if let Ok(next_val) = iter.next() {
+                            element = String::from_utf8(next_val).unwrap();
+                            if let Ok(next_val) = iter.next() {
+                                let score_str = String::from_utf8(next_val).unwrap();
+                                score = score_str.parse::<f64>().unwrap();
+                            } else {
+                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
+                            }
+                            val.push((element, score));
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::SortedSet(&key, &val)));
+                }
             }
             RDB_TYPE_SET_INTSET => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let bytes = self.read_string()?;
                 let mut cursor = Cursor::new(&bytes);
                 let encoding = cursor.read_i32::<LittleEndian>()?;
                 let length = cursor.read_u32::<LittleEndian>()?;
                 let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_SET));
+        
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::Set(&key, &val)));
+                }
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = self.read_string()?;
+                let key = String::from_utf8(key).unwrap();
                 let (count, _) = self.read_length()?;
                 let mut iter = QuickListIter { len: -1, count, input: self, cursor: Option::None };
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(&key, &mut iter, OBJ_LIST)
-                );
+    
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            let next_val = String::from_utf8(next_val).unwrap();
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.iter().for_each(|handler|
+                        handler.handle(&Object::List(&key, &val)));
+                }
             }
             RDB_TYPE_MODULE => {
                 // TODO

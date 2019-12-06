@@ -1,6 +1,6 @@
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
-use crate::iter::Iter;
+use crate::rdb::Object;
 
 mod config;
 pub mod listener;
@@ -23,7 +23,7 @@ pub trait RedisListener {
 
 // 定义redis rdb事件的处理接口
 pub trait RdbHandler {
-    fn handle(&self, key: &Vec<u8>, values: &mut dyn Iter, obj_type: u8);
+    fn handle(&self, data: &Object);
 }
 
 // 定义redis命令的处理接口
@@ -34,31 +34,36 @@ pub trait CommandHandler {
 pub struct EchoRdbHandler {}
 
 impl RdbHandler for EchoRdbHandler {
-    fn handle(&self, key: &Vec<u8>, values: &mut dyn Iter, obj_type: u8) {
-        print!("[{:?}] {}: ", obj_type, String::from_utf8(key.to_vec()).unwrap());
-        loop {
-            match values.next() {
-                Ok(val) => {
-                    print!("{} ", String::from_utf8(val).unwrap());
+    fn handle(&self, data: &Object) {
+        // 打印的格式不咋样, 将就看吧
+        match data {
+            Object::String(key, val) => {
+                println!("{}={}", key, val);
+            }
+            Object::List(key, val) => {
+                let values = val.join(", ");
+                println!("{}=[ {} ]\r", key, values);
+            }
+            Object::Set(key, val) => {
+                let values = val.join(", ");
+                println!("{}=[ {} ]\r", key, values);
+            }
+            Object::SortedSet(key, val) => {
+                print!("{}=[", key);
+                for (element, score) in val.iter() {
+                    print!("{}:{} ", element, score);
                 }
-                Err(ref err) if err.kind() == ErrorKind::NotFound => break,
-                Err(err) => {
-                    println!("error: {}", err);
-                    break;
+                println!("]");
+            }
+            Object::Hash(key, val) => {
+                print!("{}=[ ", key);
+                for (field, value) in val.iter() {
+                    print!("{}:{} ", field, value);
                 }
+                println!("]");
             }
         }
-        println!();
     }
 }
 
 pub struct Command {}
-
-/// Data types
-pub const OBJ_STRING: u8 = 0;    /* String object. */
-pub const OBJ_LIST: u8 = 1;      /* List object. */
-pub const OBJ_SET: u8 = 2;       /* Set object. */
-pub const OBJ_ZSET: u8 = 3;      /* Sorted set object. */
-pub const OBJ_HASH: u8 = 4;      /* Hash object. */
-pub const OBJ_MODULE: u8 = 5;    /* Module object. */
-pub const OBJ_STREAM: u8 = 6;    /* Stream object. */

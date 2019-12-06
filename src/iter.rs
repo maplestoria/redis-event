@@ -100,29 +100,24 @@ pub(crate) struct SortedSetIter<'a> {
     /// v = 1, zset
     /// v = 2, zset2
     pub(crate) v: u8,
-    pub(crate) read_score: bool,
     pub(crate) input: &'a mut Reader,
 }
 
-impl Iter for SortedSetIter<'_> {
-    fn next(&mut self) -> io::Result<Vec<u8>> {
+impl SortedSetIter<'_> {
+    pub(crate) fn next(&mut self) -> io::Result<(String, f64)> {
         if self.count > 0 {
-            let val;
-            if self.read_score {
-                if self.v == 1 {
-                    val = self.input.read_double()?;
-                } else {
-                    // TODO zset2 score处理
-                    let score = self.input.read_i64::<LittleEndian>()?;
-                    val = score.to_string().into_bytes();
-                }
-                self.count -= 1;
-                self.read_score = false;
+            let element = self.input.read_string()?;
+            let element = String::from_utf8(element).unwrap();
+            let score;
+            if self.v == 1 {
+                score = self.input.read_double()?;
             } else {
-                val = self.input.read_string()?;
-                self.read_score = true;
+                // TODO zset2 score处理
+                let score_i64 = self.input.read_i64::<LittleEndian>()?;
+                score = score_i64 as f64;
             }
-            return Ok(val);
+            self.count -= 1;
+            return Ok((element, score));
         }
         Err(Error::new(ErrorKind::NotFound, "No element left"))
     }
