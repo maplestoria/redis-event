@@ -189,7 +189,6 @@ pub mod standalone {
                     }
                 }
             }
-            Ok(Empty)
         }
         
         pub fn add_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {

@@ -72,16 +72,6 @@ pub struct EchoCmdHandler {}
 
 impl CommandHandler for EchoCmdHandler {
     fn handle(&self, cmd: Command) {
-        match cmd {
-            Command::SET(set) => {
-                println!("{:?}", set);
-            }
-            Command::PING => {
-                println!("PING");
-            }
-            Command::SELECT(db) => {
-                println!("SELECT DB: {}", db);
-            }
-        }
+        println!("{:?}", cmd);
     }
 }

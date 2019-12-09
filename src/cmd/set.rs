@@ -29,11 +29,11 @@ pub enum ExistType {
 pub(crate) fn parse_set(mut iter: slice::Iter<Vec<u8>>) -> Result<SET> {
     let key = iter.next();
     let key = String::from_utf8(key.unwrap().to_vec())
-        .expect("expect key of SET command");
+        .expect("UTF-8转换错误");
     
     let value = iter.next();
     let value = String::from_utf8(value.unwrap().to_vec())
-        .expect("expect value of SET command");
+        .expect("UTF-8转换错误");
     
     let mut expire_time = None;
     let mut expire_type = None;
@@ -59,8 +59,66 @@ pub(crate) fn parse_set(mut iter: slice::Iter<Vec<u8>>) -> Result<SET> {
     Ok(SET { key, value, expire_type, exist_type, expire_time })
 }
 
-pub struct SETEX {}
+#[derive(Debug)]
+pub struct SETEX {
+    pub key: String,
+    pub seconds: i64,
+    pub value: String,
+}
 
-pub struct SETNX {}
+pub(crate) fn parse_setex(iter: slice::Iter<Vec<u8>>) -> Result<SETEX> {
+    let args = iter.as_slice();
+    if args.len() != 3 {
+        panic!("invalid setnx args len");
+    }
+    let key = String::from_utf8(args[0].to_vec())
+        .expect("UTF-8转换错误");
+    let seconds = String::from_utf8(args[1].to_vec())
+        .expect("UTF-8转换错误");
+    let seconds = seconds.parse::<i64>()
+        .expect("解析setex命令时间参数错误");
+    let value = String::from_utf8(args[2].to_vec())
+        .expect("UTF-8转换错误");
+    Ok(SETEX { key, seconds, value })
+}
 
-pub struct PSETEX {}
+#[derive(Debug)]
+pub struct SETNX {
+    pub key: String,
+    pub value: String,
+}
+
+pub(crate) fn parse_setnx(iter: slice::Iter<Vec<u8>>) -> Result<SETNX> {
+    let args = iter.as_slice();
+    if args.len() != 2 {
+        panic!("invalid setnx args len");
+    }
+    let key = String::from_utf8(args[0].to_vec())
+        .expect("UTF-8转换错误");
+    let value = String::from_utf8(args[1].to_vec())
+        .expect("UTF-8转换错误");
+    Ok(SETNX { key, value })
+}
+
+#[derive(Debug)]
+pub struct PSETEX {
+    pub key: String,
+    pub milliseconds: i64,
+    pub value: String,
+}
+
+pub(crate) fn parse_psetex(iter: slice::Iter<Vec<u8>>) -> Result<PSETEX> {
+    let args = iter.as_slice();
+    if args.len() != 3 {
+        panic!("invalid psetex args len");
+    }
+    let key = String::from_utf8(args[0].to_vec())
+        .expect("UTF-8转换错误");
+    let milliseconds = String::from_utf8(args[1].to_vec())
+        .expect("UTF-8转换错误");
+    let milliseconds = milliseconds.parse::<i64>()
+        .expect("解析psetex命令时间参数错误");
+    let value = String::from_utf8(args[2].to_vec())
+        .expect("UTF-8转换错误");
+    Ok(PSETEX { key, milliseconds, value })
+}
