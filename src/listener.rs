@@ -275,7 +275,7 @@ pub mod standalone {
                     Ok(Data::Bytes(_)) => return Err(Error::new(ErrorKind::InvalidData,
                                                                 "Expect BytesVec response, but got Bytes")),
                     Ok(Data::BytesVec(data)) => {
-                        cmd::parse(data, &self.cmd_listeners)?;
+                        cmd::parse(data, &self.cmd_listeners);
                     }
                     Err(err) => return Err(err),
                     Ok(Empty) => {}

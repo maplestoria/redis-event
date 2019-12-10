@@ -1,7 +1,23 @@
 use core::slice;
-use std::io::Result;
 
 use crate::to_string;
+
+/// 这个模块处理Strings相关的命令
+/// 所有涉及到的命令参考https://redis.io/commands#string
+///
+#[derive(Debug)]
+pub struct APPEND {
+    pub key: String,
+    pub value: String,
+}
+
+pub(crate) fn parse_append(mut iter: slice::Iter<Vec<u8>>) -> APPEND {
+    let key = iter.next();
+    let key = to_string(key.unwrap().to_vec());
+    let value = iter.next();
+    let value = to_string(value.unwrap().to_vec());
+    APPEND { key, value }
+}
 
 #[derive(Debug)]
 pub struct SET {
@@ -28,7 +44,7 @@ pub enum ExistType {
     XX,
 }
 
-pub(crate) fn parse_set(mut iter: slice::Iter<Vec<u8>>) -> Result<SET> {
+pub(crate) fn parse_set(mut iter: slice::Iter<Vec<u8>>) -> SET {
     let key = iter.next();
     let key = to_string(key.unwrap().to_vec());
     
@@ -56,7 +72,7 @@ pub(crate) fn parse_set(mut iter: slice::Iter<Vec<u8>>) -> Result<SET> {
         }
     }
     
-    Ok(SET { key, value, expire_type, exist_type, expire_time })
+    SET { key, value, expire_type, exist_type, expire_time }
 }
 
 #[derive(Debug)]
@@ -66,7 +82,7 @@ pub struct SETEX {
     pub value: String,
 }
 
-pub(crate) fn parse_setex(iter: slice::Iter<Vec<u8>>) -> Result<SETEX> {
+pub(crate) fn parse_setex(iter: slice::Iter<Vec<u8>>) -> SETEX {
     let args = iter.as_slice();
     if args.len() != 3 {
         panic!("invalid setnx args len");
@@ -76,7 +92,7 @@ pub(crate) fn parse_setex(iter: slice::Iter<Vec<u8>>) -> Result<SETEX> {
     let seconds = seconds.parse::<i64>()
         .expect("解析setex命令时间参数错误");
     let value = to_string(args[2].to_vec());
-    Ok(SETEX { key, seconds, value })
+    SETEX { key, seconds, value }
 }
 
 #[derive(Debug)]
@@ -85,14 +101,14 @@ pub struct SETNX {
     pub value: String,
 }
 
-pub(crate) fn parse_setnx(iter: slice::Iter<Vec<u8>>) -> Result<SETNX> {
+pub(crate) fn parse_setnx(iter: slice::Iter<Vec<u8>>) -> SETNX {
     let args = iter.as_slice();
     if args.len() != 2 {
         panic!("invalid setnx args len");
     }
     let key = to_string(args[0].to_vec());
     let value = to_string(args[1].to_vec());
-    Ok(SETNX { key, value })
+    SETNX { key, value }
 }
 
 #[derive(Debug)]
@@ -102,7 +118,7 @@ pub struct PSETEX {
     pub value: String,
 }
 
-pub(crate) fn parse_psetex(iter: slice::Iter<Vec<u8>>) -> Result<PSETEX> {
+pub(crate) fn parse_psetex(iter: slice::Iter<Vec<u8>>) -> PSETEX {
     let args = iter.as_slice();
     if args.len() != 3 {
         panic!("invalid psetex args len");
@@ -112,5 +128,5 @@ pub(crate) fn parse_psetex(iter: slice::Iter<Vec<u8>>) -> Result<PSETEX> {
     let milliseconds = milliseconds.parse::<i64>()
         .expect("解析psetex命令时间参数错误");
     let value = to_string(args[2].to_vec());
-    Ok(PSETEX { key, milliseconds, value })
+    PSETEX { key, milliseconds, value }
 }
