@@ -6,7 +6,7 @@ pub mod standalone {
     use std::thread;
     use std::time::{Duration, Instant};
     
-    use crate::{cmd, CommandHandler, config, rdb, RdbHandler, RedisListener};
+    use crate::{cmd, CommandHandler, config, rdb, RdbHandler, RedisListener, to_string};
     use crate::config::Config;
     use crate::listener::standalone::SyncMode::PSync;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
@@ -117,7 +117,7 @@ pub mod standalone {
                             if response_type == PLUS || response_type == COLON {
                                 return Ok(Bytes(bytes));
                             } else {
-                                let message = String::from_utf8(bytes).unwrap();
+                                let message = to_string(bytes);
                                 return Err(Error::new(ErrorKind::InvalidInput, message));
                             }
                         } else {
@@ -136,7 +136,7 @@ pub mod standalone {
                         }
                         let byte = socket.read_u8()?;
                         if byte == LF {
-                            let length = String::from_utf8(bytes).unwrap();
+                            let length = to_string(bytes);
                             let length = length.parse::<isize>().unwrap();
                             let stream = self.reader.as_mut().unwrap();
                             return func(stream, length, &self.rdb_listeners, &self.cmd_listeners);
@@ -156,7 +156,7 @@ pub mod standalone {
                         }
                         let byte = socket.read_u8()?;
                         if byte == LF {
-                            let length = String::from_utf8(bytes).unwrap();
+                            let length = to_string(bytes);
                             let length = length.parse::<isize>().unwrap();
                             if length <= 0 {
                                 return Ok(Empty);
@@ -209,7 +209,7 @@ pub mod standalone {
             send(writer, b"PSYNC", &[repl_id, repl_offset])?;
         
             if let Bytes(resp) = self.response(rdb::read_bytes)? {
-                let resp = String::from_utf8(resp).unwrap();
+                let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
                     self.response(rdb::parse)?;
                     let mut iter = resp.split_whitespace();

@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::io::Result;
 
 use crate::cmd::Command;
 use crate::rdb::Object;
@@ -20,7 +20,7 @@ mod tests;
 // - 哨兵(sentinel)
 pub trait RedisListener {
     // 开启监听
-    fn open(&mut self) -> Result<(), Error>;
+    fn open(&mut self) -> Result<()>;
 }
 
 // 定义redis rdb事件的处理接口
@@ -74,4 +74,11 @@ impl CommandHandler for EchoCmdHandler {
     fn handle(&self, cmd: Command) {
         println!("{:?}", cmd);
     }
+}
+
+/// 转换为utf-8字符串，不验证正确性
+fn to_string(bytes: Vec<u8>) -> String {
+    return unsafe {
+        String::from_utf8_unchecked(bytes)
+    };
 }

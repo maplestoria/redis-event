@@ -2,7 +2,7 @@ use std::io::{Cursor, Error, ErrorKind, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, RdbHandler};
+use crate::{CommandHandler, RdbHandler, to_string};
 use crate::cmd::Command;
 use crate::rdb::Data::{Bytes, Empty};
 use crate::reader::Reader;
@@ -93,7 +93,7 @@ pub(crate) fn parse(input: &mut Reader,
     input.read_exact(&mut bytes)?;
     // 4个字节: rdb版本
     input.read_exact(&mut bytes[..=3])?;
-    let rdb_version = String::from_utf8(bytes[..=3].to_vec()).unwrap();
+    let rdb_version = to_string(bytes[..=3].to_vec());
     let rdb_version = rdb_version.parse::<isize>().unwrap();
     loop {
         let data_type = input.read_u8()?;
@@ -101,8 +101,8 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_OPCODE_AUX => {
                 let field_name = input.read_string()?;
                 let field_val = input.read_string()?;
-                let field_name = String::from_utf8(field_name).unwrap();
-                let field_val = String::from_utf8(field_val).unwrap();
+                let field_name = to_string(field_name);
+                let field_val = to_string(field_val);
                 println!("{}:{}", field_name, field_val);
             }
             RDB_OPCODE_SELECTDB => {
