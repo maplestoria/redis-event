@@ -1,10 +1,12 @@
-use std::io::Error;
+use std::io::Result;
 
+use crate::cmd::Command;
 use crate::rdb::Object;
 
+pub mod cmd;
 mod config;
 pub mod listener;
-pub mod iter;
+mod iter;
 mod lzf;
 mod rdb;
 mod reader;
@@ -18,23 +20,23 @@ mod tests;
 // - 哨兵(sentinel)
 pub trait RedisListener {
     // 开启监听
-    fn open(&mut self) -> Result<(), Error>;
+    fn open(&mut self) -> Result<()>;
 }
 
 // 定义redis rdb事件的处理接口
 pub trait RdbHandler {
-    fn handle(&self, data: &Object);
+    fn handle(&self, data: Object);
 }
 
 // 定义redis命令的处理接口
 pub trait CommandHandler {
-    fn handle(&self, c: &Command);
+    fn handle(&self, cmd: Command);
 }
 
 pub struct EchoRdbHandler {}
 
 impl RdbHandler for EchoRdbHandler {
-    fn handle(&self, data: &Object) {
+    fn handle(&self, data: Object) {
         // 打印的格式不咋样, 将就看吧
         match data {
             Object::String(key, val) => {
@@ -66,4 +68,17 @@ impl RdbHandler for EchoRdbHandler {
     }
 }
 
-pub struct Command {}
+pub struct EchoCmdHandler {}
+
+impl CommandHandler for EchoCmdHandler {
+    fn handle(&self, cmd: Command) {
+        println!("{:?}", cmd);
+    }
+}
+
+/// 转换为utf-8字符串，不验证正确性
+fn to_string(bytes: Vec<u8>) -> String {
+    return unsafe {
+        String::from_utf8_unchecked(bytes)
+    };
+}

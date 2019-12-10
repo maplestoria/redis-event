@@ -2,7 +2,8 @@ use std::io::{Cursor, Error, ErrorKind, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, RdbHandler};
+use crate::{CommandHandler, RdbHandler, to_string};
+use crate::cmd::Command;
 use crate::rdb::Data::{Bytes, Empty};
 use crate::reader::Reader;
 
@@ -92,7 +93,7 @@ pub(crate) fn parse(input: &mut Reader,
     input.read_exact(&mut bytes)?;
     // 4个字节: rdb版本
     input.read_exact(&mut bytes[..=3])?;
-    let rdb_version = String::from_utf8(bytes[..=3].to_vec()).unwrap();
+    let rdb_version = to_string(bytes[..=3].to_vec());
     let rdb_version = rdb_version.parse::<isize>().unwrap();
     loop {
         let data_type = input.read_u8()?;
@@ -100,13 +101,14 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_OPCODE_AUX => {
                 let field_name = input.read_string()?;
                 let field_val = input.read_string()?;
-                let field_name = String::from_utf8(field_name).unwrap();
-                let field_val = String::from_utf8(field_val).unwrap();
+                let field_name = to_string(field_name);
+                let field_val = to_string(field_val);
                 println!("{}:{}", field_name, field_val);
             }
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
-                println!("db: {}", db);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SELECT(db as u8)));
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;
@@ -255,10 +257,25 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
     }
 }
 
+/// Redis中的各个数据类型
 pub enum Object<'a> {
+    /// String:
+    ///   左边是key, 右边是value
     String(&'a str, &'a str),
+    
+    /// List:
+    ///   左边是key, 右边是values
     List(&'a str, &'a Vec<String>),
+    
+    /// Set:
+    ///   左边是key, 右边是values
     Set(&'a str, &'a Vec<String>),
+    
+    /// SortedSet:
+    ///   左边是key, 右边是值的形式为(member, score)的vec
     SortedSet(&'a str, &'a Vec<(String, f64)>),
+    
+    /// Hash:
+    ///   左边是key, 右边是值的形式为(field, value)的vec
     Hash(&'a str, &'a Vec<(String, String)>),
 }

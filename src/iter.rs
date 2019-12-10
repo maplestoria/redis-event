@@ -5,6 +5,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::rdb::{read_zip_list_entry, read_zm_len};
 use crate::reader::Reader;
+use crate::to_string;
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -107,7 +108,7 @@ impl SortedSetIter<'_> {
     pub(crate) fn next(&mut self) -> io::Result<(String, f64)> {
         if self.count > 0 {
             let element = self.input.read_string()?;
-            let element = String::from_utf8(element).unwrap();
+            let element = to_string(element);
             let score;
             if self.v == 1 {
                 score = self.input.read_double()?;
