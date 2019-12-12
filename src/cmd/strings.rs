@@ -1,4 +1,4 @@
-use core::slice;
+use core::slice::Iter;
 
 use crate::to_string;
 
@@ -11,12 +11,138 @@ pub struct APPEND {
     pub value: String,
 }
 
-pub(crate) fn parse_append(mut iter: slice::Iter<Vec<u8>>) -> APPEND {
+pub(crate) fn parse_append(mut iter: Iter<Vec<u8>>) -> APPEND {
     let key = iter.next();
     let key = to_string(key.unwrap().to_vec());
     let value = iter.next();
     let value = to_string(value.unwrap().to_vec());
     APPEND { key, value }
+}
+
+#[derive(Debug)]
+pub struct BITFIELD {
+    pub key: String,
+    pub statements: Option<Vec<Operation>>,
+    pub overflows: Option<Vec<Overflow>>,
+}
+
+#[derive(Debug)]
+pub enum Operation {
+    GET(Get),
+    INCRBY(IncrBy),
+    SET(Set),
+}
+
+#[derive(Debug)]
+pub struct Get {
+    pub _type: String,
+    pub offset: i64,
+}
+
+#[derive(Debug)]
+pub struct IncrBy {
+    pub _type: String,
+    pub offset: i64,
+    pub increment: i64,
+}
+
+#[derive(Debug)]
+pub struct Set {
+    pub _type: String,
+    pub offset: i64,
+    pub value: i64,
+}
+
+#[derive(Debug)]
+pub enum Overflow {
+    WRAP,
+    SAT,
+    FAIL,
+}
+
+pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
+    let key = iter.next();
+    let key = to_string(key.unwrap().to_vec());
+    
+    let mut statements = Vec::new();
+    let mut overflows = Vec::new();
+    loop {
+        if let Some(next_arg) = iter.next() {
+            let arg = to_string(next_arg.to_vec());
+            let arg_upper = &arg.to_uppercase();
+            if arg_upper == "GET" {
+                let _type = to_string(iter.next()
+                    .expect("bitfield 缺失get type")
+                    .to_vec());
+                
+                let offset = to_string(iter.next()
+                    .expect("bitfield 缺失get offset")
+                    .to_vec());
+                let offset = offset.parse::<i64>().expect("bitfield get offset无效数字");
+                
+                statements.push(Operation::GET(Get { _type, offset }));
+            } else if arg_upper == "SET" {
+                let _type = to_string(iter.next()
+                    .expect("bitfield 缺失SET type")
+                    .to_vec());
+    
+                let offset = to_string(iter.next()
+                    .expect("bitfield 缺失SET offset")
+                    .to_vec());
+                let offset = offset.parse::<i64>().expect("bitfield INCR offset无效数字");
+    
+                let value = to_string(iter.next()
+                    .expect("bitfield 缺失SET offset")
+                    .to_vec());
+                let value = value.parse::<i64>().expect("bitfield SET value无效数字");
+    
+                statements.push(Operation::SET(Set { _type, offset, value }));
+            } else if arg_upper == "INCRBY" {
+                let _type = to_string(iter.next()
+                    .expect("bitfield 缺失INCR type")
+                    .to_vec());
+                
+                let offset = to_string(iter.next()
+                    .expect("bitfield 缺失INCR offset")
+                    .to_vec());
+                let offset = offset.parse::<i64>().expect("bitfield INCR offset无效数字");
+                
+                let increment = to_string(iter.next()
+                    .expect("bitfield 缺失INCR offset")
+                    .to_vec());
+                let increment = increment.parse::<i64>().expect("bitfield INCR increment无效数字");
+                
+                statements.push(Operation::INCRBY(IncrBy { _type, offset, increment }));
+            } else if arg_upper == "OVERFLOW" {
+                let _type = to_string(iter.next()
+                    .expect("bitfield 缺失OVERFLOW type")
+                    .to_vec());
+                let type_upper = &_type.to_uppercase();
+                if type_upper == "FAIL" {
+                    overflows.push(Overflow::FAIL);
+                } else if type_upper == "SAT" {
+                    overflows.push(Overflow::SAT);
+                } else if type_upper == "WRAP" {
+                    overflows.push(Overflow::WRAP);
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    let _statements;
+    if statements.is_empty() {
+        _statements = None;
+    } else {
+        _statements = Some(statements);
+    }
+    let _overflows;
+    if overflows.is_empty() {
+        _overflows = None;
+    } else {
+        _overflows = Some(overflows);
+    }
+    BITFIELD { key, statements: _statements, overflows: _overflows }
 }
 
 #[derive(Debug)]
@@ -44,7 +170,7 @@ pub enum ExistType {
     XX,
 }
 
-pub(crate) fn parse_set(mut iter: slice::Iter<Vec<u8>>) -> SET {
+pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     let key = iter.next();
     let key = to_string(key.unwrap().to_vec());
     
@@ -82,7 +208,7 @@ pub struct SETEX {
     pub value: String,
 }
 
-pub(crate) fn parse_setex(iter: slice::Iter<Vec<u8>>) -> SETEX {
+pub(crate) fn parse_setex(iter: Iter<Vec<u8>>) -> SETEX {
     let args = iter.as_slice();
     if args.len() != 3 {
         panic!("invalid setnx args len");
@@ -101,7 +227,7 @@ pub struct SETNX {
     pub value: String,
 }
 
-pub(crate) fn parse_setnx(iter: slice::Iter<Vec<u8>>) -> SETNX {
+pub(crate) fn parse_setnx(iter: Iter<Vec<u8>>) -> SETNX {
     let args = iter.as_slice();
     if args.len() != 2 {
         panic!("invalid setnx args len");
@@ -118,7 +244,7 @@ pub struct PSETEX {
     pub value: String,
 }
 
-pub(crate) fn parse_psetex(iter: slice::Iter<Vec<u8>>) -> PSETEX {
+pub(crate) fn parse_psetex(iter: Iter<Vec<u8>>) -> PSETEX {
     let args = iter.as_slice();
     if args.len() != 3 {
         panic!("invalid psetex args len");
