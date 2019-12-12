@@ -20,36 +20,36 @@ pub(crate) fn parse_append(mut iter: Iter<Vec<u8>>) -> APPEND {
 }
 
 #[derive(Debug)]
-pub struct BITFIELD {
-    pub key: String,
-    pub statements: Option<Vec<Operation>>,
+pub struct BITFIELD<'a> {
+    pub key: &'a [u8],
+    pub statements: Option<Vec<Operation<'a>>>,
     pub overflows: Option<Vec<Overflow>>,
 }
 
 #[derive(Debug)]
-pub enum Operation {
-    GET(Get),
-    INCRBY(IncrBy),
-    SET(Set),
+pub enum Operation<'a> {
+    GET(Get<'a>),
+    INCRBY(IncrBy<'a>),
+    SET(Set<'a>),
 }
 
 #[derive(Debug)]
-pub struct Get {
-    pub _type: String,
-    pub offset: i64,
+pub struct Get<'a> {
+    pub _type: &'a [u8],
+    pub offset: &'a [u8],
 }
 
 #[derive(Debug)]
-pub struct IncrBy {
-    pub _type: String,
-    pub offset: i64,
+pub struct IncrBy<'a> {
+    pub _type: &'a [u8],
+    pub offset: &'a [u8],
     pub increment: i64,
 }
 
 #[derive(Debug)]
-pub struct Set {
-    pub _type: String,
-    pub offset: i64,
+pub struct Set<'a> {
+    pub _type: &'a [u8],
+    pub offset: &'a [u8],
     pub value: i64,
 }
 
@@ -61,8 +61,7 @@ pub enum Overflow {
 }
 
 pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
-    let key = iter.next();
-    let key = to_string(key.unwrap().to_vec());
+    let key = iter.next().unwrap();
     
     let mut statements = Vec::new();
     let mut overflows = Vec::new();
@@ -71,41 +70,32 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
             let arg = to_string(next_arg.to_vec());
             let arg_upper = &arg.to_uppercase();
             if arg_upper == "GET" {
-                let _type = to_string(iter.next()
-                    .expect("bitfield 缺失get type")
-                    .to_vec());
+                let _type = iter.next()
+                    .expect("bitfield 缺失get type");
                 
-                let offset = to_string(iter.next()
-                    .expect("bitfield 缺失get offset")
-                    .to_vec());
-                let offset = offset.parse::<i64>().expect("bitfield get offset无效数字");
+                let offset = iter.next()
+                    .expect("bitfield 缺失get offset");
                 
                 statements.push(Operation::GET(Get { _type, offset }));
             } else if arg_upper == "SET" {
-                let _type = to_string(iter.next()
-                    .expect("bitfield 缺失SET type")
-                    .to_vec());
-    
-                let offset = to_string(iter.next()
+                let _type = iter.next().unwrap();
+                
+                let offset = iter.next()
                     .expect("bitfield 缺失SET offset")
-                    .to_vec());
-                let offset = offset.parse::<i64>().expect("bitfield INCR offset无效数字");
-    
+                    ;
+                
                 let value = to_string(iter.next()
                     .expect("bitfield 缺失SET offset")
                     .to_vec());
                 let value = value.parse::<i64>().expect("bitfield SET value无效数字");
-    
+                
                 statements.push(Operation::SET(Set { _type, offset, value }));
             } else if arg_upper == "INCRBY" {
-                let _type = to_string(iter.next()
-                    .expect("bitfield 缺失INCR type")
-                    .to_vec());
+                let _type = iter.next()
+                    .expect("bitfield 缺失INCR type");
                 
-                let offset = to_string(iter.next()
-                    .expect("bitfield 缺失INCR offset")
-                    .to_vec());
-                let offset = offset.parse::<i64>().expect("bitfield INCR offset无效数字");
+                let offset = iter.next()
+                    .expect("bitfield 缺失INCR offset");
                 
                 let increment = to_string(iter.next()
                     .expect("bitfield 缺失INCR offset")

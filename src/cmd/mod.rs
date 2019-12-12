@@ -6,7 +6,7 @@ pub mod strings;
 #[derive(Debug)]
 pub enum Command<'a> {
     APPEND(&'a APPEND),
-    BITFIELD(&'a BITFIELD),
+    BITFIELD(&'a BITFIELD<'a>),
     SET(&'a SET),
     SETEX(&'a SETEX),
     SETNX(&'a SETNX),
