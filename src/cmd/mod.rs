@@ -1,13 +1,16 @@
+use crate::cmd::keys::*;
 use crate::cmd::strings::*;
 use crate::CommandHandler;
 
 pub mod strings;
+pub mod keys;
 
 #[derive(Debug)]
 pub enum Command<'a> {
     APPEND(&'a APPEND<'a>),
     BITFIELD(&'a BITFIELD<'a>),
     BITOP(&'a BITOP<'a>),
+    DEL(&'a DEL<'a>),
     SET(&'a SET<'a>),
     SETEX(&'a SETEX<'a>),
     SETNX(&'a SETNX<'a>),
@@ -37,6 +40,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_bitop(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::BITOP(&cmd))
+                );
+            }
+            "DEL" => {
+                let cmd = keys::parse_del(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::DEL(&cmd))
                 );
             }
             "SET" => {
