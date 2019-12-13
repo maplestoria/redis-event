@@ -1,5 +1,6 @@
 use core::slice::Iter;
 
+use crate::cmd::strings::Op::{AND, NOT, OR, XOR};
 use crate::to_string;
 
 /// 这个模块处理Strings相关的命令
@@ -118,6 +119,52 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
         _overflows = Some(overflows);
     }
     BITFIELD { key, statements: _statements, overflows: _overflows }
+}
+
+#[derive(Debug)]
+pub struct BITOP<'a> {
+    pub operation: Op,
+    pub dest_key: &'a [u8],
+    pub keys: Vec<&'a Vec<u8>>,
+}
+
+#[derive(Debug)]
+pub enum Op {
+    AND,
+    OR,
+    XOR,
+    NOT,
+}
+
+pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
+    let operation;
+    let op = to_string(iter.next().unwrap().to_vec())
+        .to_uppercase();
+    if &op == "AND" {
+        operation = AND;
+    } else if &op == "OR" {
+        operation = OR;
+    } else if &op == "XOR" {
+        operation = XOR;
+    } else if &op == "NOT" {
+        operation = NOT;
+    } else {
+        panic!("bitop命令缺失operation")
+    }
+    let dest_key = iter.next().unwrap();
+    
+    let mut keys = Vec::new();
+    loop {
+        if let Some(next_arg) = iter.next() {
+            keys.push(next_arg);
+        } else {
+            break;
+        }
+    }
+    if keys.is_empty() {
+        panic!("bitop命令缺失input key")
+    }
+    BITOP { operation, dest_key, keys }
 }
 
 #[derive(Debug)]
