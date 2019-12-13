@@ -212,16 +212,13 @@ impl Reader {
         match value_type {
             RDB_TYPE_STRING => {
                 let key = self.read_string()?;
-                let key = to_string(key);
-                let val = self.read_string()?;
-                let val = to_string(val);
+                let value = self.read_string()?;
                 rdb_handlers.iter().for_each(|handler|
-                    handler.handle(Object::String(&key, &val))
+                    handler.handle(Object::String(KeyValue { key: &key, value: &value }))
                 );
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
                 
@@ -230,7 +227,6 @@ impl Reader {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
-                            let next_val = to_string(next_val);
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -239,16 +235,15 @@ impl Reader {
                     }
                     if value_type == RDB_TYPE_LIST {
                         rdb_handlers.iter().for_each(|handler|
-                            handler.handle(Object::List(&key, &val)));
+                            handler.handle(Object::List(List { key: &key, values: &val })));
                     } else {
                         rdb_handlers.iter().for_each(|handler|
-                            handler.handle(Object::Set(&key, &val)));
+                            handler.handle(Object::Set(Set { key: &key, values: &val })));
                     }
                 }
             }
             RDB_TYPE_ZSET => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let (count, _) = self.read_length()?;
                 let mut iter = SortedSetIter { count, v: 1, input: self };
                 
@@ -264,12 +259,11 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(&key, &val)));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
                 }
             }
             RDB_TYPE_ZSET_2 => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let (count, _) = self.read_length()?;
                 let mut iter = SortedSetIter { count, v: 2, input: self };
                 
@@ -285,12 +279,11 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(&key, &val)));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
                 }
             }
             RDB_TYPE_HASH => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
                 
@@ -298,28 +291,27 @@ impl Reader {
                 while has_more {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
-                        let field;
-                        let field_val;
+                        let name;
+                        let value;
                         if let Ok(next_val) = iter.next() {
-                            field = to_string(next_val);
+                            name = next_val;
                             if let Ok(next_val) = iter.next() {
-                                field_val = to_string(next_val);
+                                value = next_val;
                             } else {
                                 return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
                             }
-                            val.push((field, field_val));
+                            val.push(Field { name, value });
                         } else {
                             has_more = false;
                             break;
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Hash(&key, &val)));
+                        handler.handle(Object::Hash(Hash { key: &key, fields: &val })));
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
@@ -329,28 +321,27 @@ impl Reader {
                 while has_more {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
-                        let field;
-                        let field_val;
+                        let name;
+                        let value;
                         if let Ok(next_val) = iter.next() {
-                            field = to_string(next_val);
+                            name = next_val;
                             if let Ok(next_val) = iter.next() {
-                                field_val = to_string(next_val);
+                                value = next_val;
                             } else {
                                 return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
                             }
-                            val.push((field, field_val));
+                            val.push(Field { name, value });
                         } else {
                             has_more = false;
                             break;
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Hash(&key, &val)));
+                        handler.handle(Object::Hash(Hash { key: &key, fields: &val })));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
@@ -363,7 +354,6 @@ impl Reader {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
-                            let next_val = to_string(next_val);
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -371,12 +361,11 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::List(&key, &val)));
+                        handler.handle(Object::List(List { key: &key, values: &val })));
                 }
             }
             RDB_TYPE_HASH_ZIPLIST => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
@@ -388,28 +377,27 @@ impl Reader {
                 while has_more {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
-                        let field;
-                        let field_val;
+                        let name;
+                        let value;
                         if let Ok(next_val) = iter.next() {
-                            field = to_string(next_val);
+                            name = next_val;
                             if let Ok(next_val) = iter.next() {
-                                field_val = to_string(next_val);
+                                value = next_val;
                             } else {
                                 return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
                             }
-                            val.push((field, field_val));
+                            val.push(Field { name, value });
                         } else {
                             has_more = false;
                             break;
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Hash(&key, &val)));
+                        handler.handle(Object::Hash(Hash { key: &key, fields: &val })));
                 }
             }
             RDB_TYPE_ZSET_ZIPLIST => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(bytes);
                 // 跳过ZL_BYTES和ZL_TAIL
@@ -424,26 +412,25 @@ impl Reader {
                         let element;
                         let score: f64;
                         if let Ok(next_val) = iter.next() {
-                            element = to_string(next_val);
+                            element = next_val;
                             if let Ok(next_val) = iter.next() {
                                 let score_str = to_string(next_val);
                                 score = score_str.parse::<f64>().unwrap();
                             } else {
                                 return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
                             }
-                            val.push((element, score));
+                            val.push(Element { element, score });
                         } else {
                             has_more = false;
                             break;
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(&key, &val)));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
                 }
             }
             RDB_TYPE_SET_INTSET => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let bytes = self.read_string()?;
                 let mut cursor = Cursor::new(&bytes);
                 let encoding = cursor.read_i32::<LittleEndian>()?;
@@ -455,7 +442,6 @@ impl Reader {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
-                            let next_val = to_string(next_val);
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -463,12 +449,11 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Set(&key, &val)));
+                        handler.handle(Object::Set(Set { key: &key, values: &val })));
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = self.read_string()?;
-                let key = to_string(key);
                 let (count, _) = self.read_length()?;
                 let mut iter = QuickListIter { len: -1, count, input: self, cursor: Option::None };
                 
@@ -477,7 +462,6 @@ impl Reader {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
                         if let Ok(next_val) = iter.next() {
-                            let next_val = to_string(next_val);
                             val.push(next_val);
                         } else {
                             has_more = false;
@@ -485,7 +469,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::List(&key, &val)));
+                        handler.handle(Object::List(List { key: &key, values: &val })));
                 }
             }
             RDB_TYPE_MODULE => {

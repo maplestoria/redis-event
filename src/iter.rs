@@ -3,9 +3,8 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::rdb::{read_zip_list_entry, read_zm_len};
+use crate::rdb::{Element, read_zip_list_entry, read_zm_len};
 use crate::reader::Reader;
-use crate::to_string;
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -105,10 +104,9 @@ pub(crate) struct SortedSetIter<'a> {
 }
 
 impl SortedSetIter<'_> {
-    pub(crate) fn next(&mut self) -> io::Result<(String, f64)> {
+    pub(crate) fn next(&mut self) -> io::Result<Element> {
         if self.count > 0 {
             let element = self.input.read_string()?;
-            let element = to_string(element);
             let score;
             if self.v == 1 {
                 score = self.input.read_double()?;
@@ -118,7 +116,7 @@ impl SortedSetIter<'_> {
                 score = score_i64 as f64;
             }
             self.count -= 1;
-            return Ok((element, score));
+            return Ok(Element { element, score });
         }
         Err(Error::new(ErrorKind::NotFound, "No element left"))
     }

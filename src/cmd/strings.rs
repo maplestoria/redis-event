@@ -6,16 +6,14 @@ use crate::to_string;
 /// 所有涉及到的命令参考https://redis.io/commands#string
 ///
 #[derive(Debug)]
-pub struct APPEND {
-    pub key: String,
-    pub value: String,
+pub struct APPEND<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
 }
 
 pub(crate) fn parse_append(mut iter: Iter<Vec<u8>>) -> APPEND {
-    let key = iter.next();
-    let key = to_string(key.unwrap().to_vec());
-    let value = iter.next();
-    let value = to_string(value.unwrap().to_vec());
+    let key = iter.next().unwrap();
+    let value = iter.next().unwrap();
     APPEND { key, value }
 }
 
@@ -43,14 +41,14 @@ pub struct Get<'a> {
 pub struct IncrBy<'a> {
     pub _type: &'a [u8],
     pub offset: &'a [u8],
-    pub increment: i64,
+    pub increment: &'a [u8],
 }
 
 #[derive(Debug)]
 pub struct Set<'a> {
     pub _type: &'a [u8],
     pub offset: &'a [u8],
-    pub value: i64,
+    pub value: &'a [u8],
 }
 
 #[derive(Debug)]
@@ -72,36 +70,23 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
             if arg_upper == "GET" {
                 let _type = iter.next()
                     .expect("bitfield 缺失get type");
-                
                 let offset = iter.next()
                     .expect("bitfield 缺失get offset");
-                
                 statements.push(Operation::GET(Get { _type, offset }));
             } else if arg_upper == "SET" {
                 let _type = iter.next().unwrap();
-                
                 let offset = iter.next()
-                    .expect("bitfield 缺失SET offset")
-                    ;
-                
-                let value = to_string(iter.next()
-                    .expect("bitfield 缺失SET offset")
-                    .to_vec());
-                let value = value.parse::<i64>().expect("bitfield SET value无效数字");
-                
+                    .expect("bitfield 缺失SET offset");
+                let value = iter.next()
+                    .expect("bitfield 缺失SET offset");
                 statements.push(Operation::SET(Set { _type, offset, value }));
             } else if arg_upper == "INCRBY" {
                 let _type = iter.next()
                     .expect("bitfield 缺失INCR type");
-                
                 let offset = iter.next()
                     .expect("bitfield 缺失INCR offset");
-                
-                let increment = to_string(iter.next()
-                    .expect("bitfield 缺失INCR offset")
-                    .to_vec());
-                let increment = increment.parse::<i64>().expect("bitfield INCR increment无效数字");
-                
+                let increment = iter.next()
+                    .expect("bitfield 缺失INCR offset");
                 statements.push(Operation::INCRBY(IncrBy { _type, offset, increment }));
             } else if arg_upper == "OVERFLOW" {
                 let _type = to_string(iter.next()
@@ -136,11 +121,11 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
 }
 
 #[derive(Debug)]
-pub struct SET {
-    pub key: String,
-    pub value: String,
+pub struct SET<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
     pub expire_type: Option<ExpireType>,
-    pub expire_time: Option<i64>,
+    pub expire_time: Option<&'a Vec<u8>>,
     pub exist_type: Option<ExistType>,
 }
 
@@ -161,19 +146,17 @@ pub enum ExistType {
 }
 
 pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
-    let key = iter.next();
-    let key = to_string(key.unwrap().to_vec());
+    let key = iter.next().unwrap();
     
-    let value = iter.next();
-    let value = to_string(value.unwrap().to_vec());
+    let value = iter.next().unwrap();
     
     let mut expire_time = None;
     let mut expire_type = None;
     let mut exist_type = None;
     
     for arg in iter {
-        let arg = to_string(arg.to_vec());
-        let p_arg = arg.as_str();
+        let arg_string = to_string(arg.to_vec());
+        let p_arg = arg_string.as_str();
         if p_arg == "EX" {
             expire_type = Some(ExpireType::EX);
         } else if p_arg == "PX" {
@@ -184,7 +167,7 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
             exist_type = Some(ExistType::XX);
         } else {
             // 读取过期时间
-            expire_time = Some(arg.parse::<i64>().unwrap());
+            expire_time = Some(arg);
         }
     }
     
@@ -192,10 +175,10 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
 }
 
 #[derive(Debug)]
-pub struct SETEX {
-    pub key: String,
+pub struct SETEX<'a> {
+    pub key: &'a [u8],
     pub seconds: i64,
-    pub value: String,
+    pub value: &'a [u8],
 }
 
 pub(crate) fn parse_setex(iter: Iter<Vec<u8>>) -> SETEX {
@@ -203,18 +186,18 @@ pub(crate) fn parse_setex(iter: Iter<Vec<u8>>) -> SETEX {
     if args.len() != 3 {
         panic!("invalid setnx args len");
     }
-    let key = to_string(args[0].to_vec());
+    let key = args.get(0).unwrap();
     let seconds = to_string(args[1].to_vec());
     let seconds = seconds.parse::<i64>()
         .expect("解析setex命令时间参数错误");
-    let value = to_string(args[2].to_vec());
+    let value = args.get(2).unwrap();
     SETEX { key, seconds, value }
 }
 
 #[derive(Debug)]
-pub struct SETNX {
-    pub key: String,
-    pub value: String,
+pub struct SETNX<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
 }
 
 pub(crate) fn parse_setnx(iter: Iter<Vec<u8>>) -> SETNX {
@@ -222,16 +205,16 @@ pub(crate) fn parse_setnx(iter: Iter<Vec<u8>>) -> SETNX {
     if args.len() != 2 {
         panic!("invalid setnx args len");
     }
-    let key = to_string(args[0].to_vec());
-    let value = to_string(args[1].to_vec());
+    let key = args.get(0).unwrap();
+    let value = args.get(1).unwrap();
     SETNX { key, value }
 }
 
 #[derive(Debug)]
-pub struct PSETEX {
-    pub key: String,
+pub struct PSETEX<'a> {
+    pub key: &'a [u8],
     pub milliseconds: i64,
-    pub value: String,
+    pub value: &'a [u8],
 }
 
 pub(crate) fn parse_psetex(iter: Iter<Vec<u8>>) -> PSETEX {
@@ -239,10 +222,10 @@ pub(crate) fn parse_psetex(iter: Iter<Vec<u8>>) -> PSETEX {
     if args.len() != 3 {
         panic!("invalid psetex args len");
     }
-    let key = to_string(args[0].to_vec());
+    let key = args.get(0).unwrap();
     let milliseconds = to_string(args[1].to_vec());
     let milliseconds = milliseconds.parse::<i64>()
         .expect("解析psetex命令时间参数错误");
-    let value = to_string(args[2].to_vec());
+    let value = args.get(2).unwrap();
     PSETEX { key, milliseconds, value }
 }

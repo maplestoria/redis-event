@@ -5,12 +5,12 @@ pub mod strings;
 
 #[derive(Debug)]
 pub enum Command<'a> {
-    APPEND(&'a APPEND),
+    APPEND(&'a APPEND<'a>),
     BITFIELD(&'a BITFIELD<'a>),
-    SET(&'a SET),
-    SETEX(&'a SETEX),
-    SETNX(&'a SETNX),
-    PSETEX(&'a PSETEX),
+    SET(&'a SET<'a>),
+    SETEX(&'a SETEX<'a>),
+    SETNX(&'a SETNX<'a>),
+    PSETEX(&'a PSETEX<'a>),
     PING,
     SELECT(u8),
 }
