@@ -5,11 +5,13 @@ pub mod strings;
 
 #[derive(Debug)]
 pub enum Command<'a> {
-    APPEND(&'a APPEND),
-    SET(&'a SET),
-    SETEX(&'a SETEX),
-    SETNX(&'a SETNX),
-    PSETEX(&'a PSETEX),
+    APPEND(&'a APPEND<'a>),
+    BITFIELD(&'a BITFIELD<'a>),
+    BITOP(&'a BITOP<'a>),
+    SET(&'a SET<'a>),
+    SETEX(&'a SETEX<'a>),
+    SETNX(&'a SETNX<'a>),
+    PSETEX(&'a PSETEX<'a>),
     PING,
     SELECT(u8),
 }
@@ -23,6 +25,18 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_append(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::APPEND(&cmd))
+                );
+            }
+            "BITFIELD" => {
+                let cmd = strings::parse_bitfield(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::BITFIELD(&cmd))
+                );
+            }
+            "BITOP" => {
+                let cmd = strings::parse_bitop(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::BITOP(&cmd))
                 );
             }
             "SET" => {

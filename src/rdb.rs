@@ -260,22 +260,54 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
 /// Redis中的各个数据类型
 pub enum Object<'a> {
     /// String:
-    ///   左边是key, 右边是value
-    String(&'a str, &'a str),
+    String(KeyValue<'a>),
     
     /// List:
-    ///   左边是key, 右边是values
-    List(&'a str, &'a Vec<String>),
+    List(List<'a>),
     
     /// Set:
-    ///   左边是key, 右边是values
-    Set(&'a str, &'a Vec<String>),
+    Set(Set<'a>),
     
     /// SortedSet:
-    ///   左边是key, 右边是值的形式为(member, score)的vec
-    SortedSet(&'a str, &'a Vec<(String, f64)>),
+    SortedSet(SortedSet<'a>),
     
     /// Hash:
-    ///   左边是key, 右边是值的形式为(field, value)的vec
-    Hash(&'a str, &'a Vec<(String, String)>),
+    Hash(Hash<'a>),
+}
+
+pub struct KeyValue<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
+}
+
+pub struct List<'a> {
+    pub key: &'a [u8],
+    pub values: &'a [Vec<u8>],
+}
+
+pub struct Set<'a> {
+    pub key: &'a [u8],
+    pub values: &'a [Vec<u8>],
+}
+
+pub struct SortedSet<'a> {
+    pub key: &'a [u8],
+    pub values: &'a [Element],
+}
+
+#[derive(Debug)]
+pub struct Element {
+    pub element: Vec<u8>,
+    pub score: f64,
+}
+
+pub struct Hash<'a> {
+    pub key: &'a [u8],
+    pub fields: &'a [Field],
+}
+
+#[derive(Debug)]
+pub struct Field {
+    pub name: Vec<u8>,
+    pub value: Vec<u8>,
 }

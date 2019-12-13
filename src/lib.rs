@@ -39,30 +39,20 @@ impl RdbHandler for EchoRdbHandler {
     fn handle(&self, data: Object) {
         // 打印的格式不咋样, 将就看吧
         match data {
-            Object::String(key, val) => {
-                println!("{}={}", key, val);
+            Object::String(key_value) => {
+                println!("{:?}={:?}", key_value.key, key_value.value);
             }
-            Object::List(key, val) => {
-                let values = val.join(", ");
-                println!("{}=[ {} ]\r", key, values);
+            Object::Hash(hash) => {
+                println!("{:?}={:?}", hash.key, hash.fields);
             }
-            Object::Set(key, val) => {
-                let values = val.join(", ");
-                println!("{}=[ {} ]\r", key, values);
+            Object::List(list) => {
+                println!("{:?}={:?}", list.key, list.values);
             }
-            Object::SortedSet(key, val) => {
-                print!("{}=[", key);
-                for (element, score) in val.iter() {
-                    print!("{}:{} ", element, score);
-                }
-                println!("]");
+            Object::Set(set) => {
+                println!("{:?}={:?}", set.key, set.values);
             }
-            Object::Hash(key, val) => {
-                print!("{}=[ ", key);
-                for (field, value) in val.iter() {
-                    print!("{}:{} ", field, value);
-                }
-                println!("]");
+            Object::SortedSet(set) => {
+                println!("{:?}={:?}", set.key, set.values);
             }
         }
     }
