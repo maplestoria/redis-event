@@ -1,7 +1,7 @@
+use crate::{CommandHandler, to_string};
 use crate::cmd::keys::*;
 use crate::cmd::sets::*;
 use crate::cmd::strings::*;
-use crate::CommandHandler;
 
 pub mod keys;
 pub mod sets;
@@ -15,14 +15,20 @@ pub enum Command<'a> {
     DEL(&'a DEL<'a>),
     DECR(&'a DECR<'a>),
     DECRBY(&'a DECRBY<'a>),
+    EXPIRE(&'a EXPIRE<'a>),
+    EXPIREAT(&'a EXPIREAT<'a>),
     INCR(&'a INCR<'a>),
     INCRBY(&'a INCRBY<'a>),
     SET(&'a SET<'a>),
+    MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
     SETEX(&'a SETEX<'a>),
     SETBIT(&'a SETBIT<'a>),
     SETNX(&'a SETNX<'a>),
+    PERSIST(&'a PERSIST<'a>),
+    PEXPIRE(&'a PEXPIRE<'a>),
+    PEXPIREAT(&'a PEXPIREAT<'a>),
     PSETEX(&'a PSETEX<'a>),
     SETRANGE(&'a SETRANGE<'a>),
     SINTERSTORE(&'a SINTERSTORE<'a>),
@@ -71,6 +77,18 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::DECRBY(&cmd))
                 );
             }
+            "EXPIRE" => {
+                let cmd = keys::parse_expire(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::EXPIRE(&cmd))
+                );
+            }
+            "EXPIREAT" => {
+                let cmd = keys::parse_expireat(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::EXPIREAT(&cmd))
+                );
+            }
             "INCR" => {
                 let cmd = strings::parse_incr(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -87,6 +105,19 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_set(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SET(&cmd))
+                );
+            }
+            "SELECT" => {
+                let db = to_string(iter.next().unwrap().to_vec());
+                let db = db.parse::<u8>().unwrap();
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SELECT(db))
+                );
+            }
+            "MOVE" => {
+                let cmd = keys::parse_move(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::MOVE(&cmd))
                 );
             }
             "MSET" => {
@@ -117,6 +148,24 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_psetex(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::PSETEX(&cmd))
+                );
+            }
+            "PEXPIRE" => {
+                let cmd = keys::parse_pexpire(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PEXPIRE(&cmd))
+                );
+            }
+            "PEXPIREAT" => {
+                let cmd = keys::parse_pexpireat(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PEXPIREAT(&cmd))
+                );
+            }
+            "PERSIST" => {
+                let cmd = keys::parse_persist(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PERSIST(&cmd))
                 );
             }
             "SETRANGE" => {
