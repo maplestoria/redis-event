@@ -14,6 +14,9 @@ pub enum Command<'a> {
     BITOP(&'a BITOP<'a>),
     DEL(&'a DEL<'a>),
     DECR(&'a DECR<'a>),
+    DECRBY(&'a DECRBY<'a>),
+    INCR(&'a INCR<'a>),
+    INCRBY(&'a INCRBY<'a>),
     SET(&'a SET<'a>),
     SETEX(&'a SETEX<'a>),
     SETNX(&'a SETNX<'a>),
@@ -57,6 +60,24 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_decr(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::DECR(&cmd))
+                );
+            }
+            "DECRBY" => {
+                let cmd = strings::parse_decrby(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::DECRBY(&cmd))
+                );
+            }
+            "INCR" => {
+                let cmd = strings::parse_incr(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::INCR(&cmd))
+                );
+            }
+            "INCRBY" => {
+                let cmd = strings::parse_incrby(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::INCRBY(&cmd))
                 );
             }
             "SET" => {
