@@ -109,3 +109,49 @@ pub(crate) fn parse_renamenx(mut iter: Iter<Vec<u8>>) -> RENAMENX {
     let new_key = iter.next().unwrap();
     RENAMENX { key, new_key }
 }
+
+#[derive(Debug)]
+pub struct RESTORE<'a> {
+    pub key: &'a [u8],
+    pub ttl: &'a [u8],
+    pub value: &'a [u8],
+    pub replace: Option<bool>,
+    pub abs_ttl: Option<bool>,
+    pub idle_time: Option<&'a [u8]>,
+    pub freq: Option<&'a [u8]>,
+}
+
+pub(crate) fn parse_restore(mut iter: Iter<Vec<u8>>) -> RESTORE {
+    let key = iter.next().unwrap();
+    let ttl = iter.next().unwrap();
+    let value = iter.next().unwrap();
+    let mut replace = None;
+    let mut abs_ttl = None;
+    let mut idle_time = None;
+    let mut freq = None;
+    loop {
+        if let Some(next_arg) = iter.next() {
+            let arg = String::from_utf8_lossy(next_arg).to_uppercase();
+            if &arg == "REPLACE" {
+                replace = Some(true);
+            } else if &arg == "ABSTTL" {
+                abs_ttl = Some(true);
+            } else if &arg == "IDLETIME" {
+                idle_time = Some(iter.next().unwrap().as_slice());
+            } else if &arg == "FREQ" {
+                freq = Some(iter.next().unwrap().as_slice());
+            }
+        } else {
+            break;
+        }
+    }
+    RESTORE {
+        key,
+        ttl,
+        value,
+        replace,
+        abs_ttl,
+        idle_time,
+        freq,
+    }
+}

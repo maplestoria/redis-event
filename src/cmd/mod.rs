@@ -25,6 +25,7 @@ pub enum Command<'a> {
     MSETNX(&'a MSETNX<'a>),
     RENAME(&'a RENAME<'a>),
     RENAMENX(&'a RENAMENX<'a>),
+    RESTORE(&'a RESTORE<'a>),
     SETEX(&'a SETEX<'a>),
     SETBIT(&'a SETBIT<'a>),
     SETNX(&'a SETNX<'a>),
@@ -113,6 +114,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_renamenx(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::RENAMENX(&cmd))
+                );
+            }
+            "RESTORE" => {
+                let cmd = keys::parse_restore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RESTORE(&cmd))
                 );
             }
             "SET" => {
