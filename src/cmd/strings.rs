@@ -1,6 +1,7 @@
 use core::slice::Iter;
 
 use crate::cmd::strings::Op::{AND, NOT, OR, XOR};
+use crate::rdb::KeyValue;
 use crate::to_string;
 
 /// 这个模块处理Strings相关的命令
@@ -333,4 +334,63 @@ pub(crate) fn parse_incrby(mut iter: Iter<Vec<u8>>) -> INCRBY {
     let key = iter.next().unwrap();
     let increment = iter.next().unwrap();
     INCRBY { key, increment }
+}
+
+#[derive(Debug)]
+pub struct MSET<'a> {
+    pub key_values: Vec<KeyValue<'a>>
+}
+
+pub(crate) fn parse_mset(mut iter: Iter<Vec<u8>>) -> MSET {
+    let mut key_values = Vec::new();
+    loop {
+        if let Some(key) = iter.next() {
+            if let Some(value) = iter.next() {
+                key_values.push(KeyValue { key, value });
+            }
+        } else {
+            break;
+        }
+    }
+    if key_values.is_empty() {
+        panic!("mset命令缺失key value");
+    }
+    MSET { key_values }
+}
+
+#[derive(Debug)]
+pub struct MSETNX<'a> {
+    pub key_values: Vec<KeyValue<'a>>
+}
+
+pub(crate) fn parse_msetnx(mut iter: Iter<Vec<u8>>) -> MSETNX {
+    let mut key_values = Vec::new();
+    loop {
+        if let Some(key) = iter.next() {
+            if let Some(value) = iter.next() {
+                key_values.push(KeyValue { key, value });
+            }
+        } else {
+            break;
+        }
+    }
+    if key_values.is_empty() {
+        panic!("msetnx命令缺失key value");
+    }
+    MSETNX { key_values }
+}
+
+
+#[derive(Debug)]
+pub struct SETBIT<'a> {
+    pub key: &'a [u8],
+    pub offset: &'a [u8],
+    pub value: &'a [u8],
+}
+
+pub(crate) fn parse_setbit(mut iter: Iter<Vec<u8>>) -> SETBIT {
+    let key = iter.next().unwrap();
+    let offset = iter.next().unwrap();
+    let value = iter.next().unwrap();
+    SETBIT { key, value, offset }
 }

@@ -275,6 +275,7 @@ pub enum Object<'a> {
     Hash(Hash<'a>),
 }
 
+#[derive(Debug)]
 pub struct KeyValue<'a> {
     pub key: &'a [u8],
     pub value: &'a [u8],
