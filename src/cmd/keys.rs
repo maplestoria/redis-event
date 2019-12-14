@@ -85,3 +85,27 @@ pub(crate) fn parse_move(mut iter: Iter<Vec<u8>>) -> MOVE {
     let db = iter.next().unwrap();
     MOVE { key, db }
 }
+
+#[derive(Debug)]
+pub struct RENAME<'a> {
+    pub key: &'a [u8],
+    pub new_key: &'a [u8],
+}
+
+pub(crate) fn parse_rename(mut iter: Iter<Vec<u8>>) -> RENAME {
+    let key = iter.next().unwrap();
+    let new_key = iter.next().unwrap();
+    RENAME { key, new_key }
+}
+
+#[derive(Debug)]
+pub struct RENAMENX<'a> {
+    pub key: &'a [u8],
+    pub new_key: &'a [u8],
+}
+
+pub(crate) fn parse_renamenx(mut iter: Iter<Vec<u8>>) -> RENAMENX {
+    let key = iter.next().unwrap();
+    let new_key = iter.next().unwrap();
+    RENAMENX { key, new_key }
+}

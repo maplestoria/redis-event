@@ -23,6 +23,8 @@ pub enum Command<'a> {
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
+    RENAME(&'a RENAME<'a>),
+    RENAMENX(&'a RENAMENX<'a>),
     SETEX(&'a SETEX<'a>),
     SETBIT(&'a SETBIT<'a>),
     SETNX(&'a SETNX<'a>),
@@ -99,6 +101,18 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_incrby(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::INCRBY(&cmd))
+                );
+            }
+            "RENAME" => {
+                let cmd = keys::parse_rename(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RENAME(&cmd))
+                );
+            }
+            "RENAMENX" => {
+                let cmd = keys::parse_renamenx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RENAMENX(&cmd))
                 );
             }
             "SET" => {
