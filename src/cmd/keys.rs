@@ -129,20 +129,16 @@ pub(crate) fn parse_restore(mut iter: Iter<Vec<u8>>) -> RESTORE {
     let mut abs_ttl = None;
     let mut idle_time = None;
     let mut freq = None;
-    loop {
-        if let Some(next_arg) = iter.next() {
-            let arg = String::from_utf8_lossy(next_arg).to_uppercase();
-            if &arg == "REPLACE" {
-                replace = Some(true);
-            } else if &arg == "ABSTTL" {
-                abs_ttl = Some(true);
-            } else if &arg == "IDLETIME" {
-                idle_time = Some(iter.next().unwrap().as_slice());
-            } else if &arg == "FREQ" {
-                freq = Some(iter.next().unwrap().as_slice());
-            }
-        } else {
-            break;
+    while let Some(next_arg) = iter.next() {
+        let arg = String::from_utf8_lossy(next_arg).to_uppercase();
+        if &arg == "REPLACE" {
+            replace = Some(true);
+        } else if &arg == "ABSTTL" {
+            abs_ttl = Some(true);
+        } else if &arg == "IDLETIME" {
+            idle_time = Some(iter.next().unwrap().as_slice());
+        } else if &arg == "FREQ" {
+            freq = Some(iter.next().unwrap().as_slice());
         }
     }
     RESTORE {

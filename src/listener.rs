@@ -34,7 +34,7 @@ pub mod standalone {
             let stream_boxed = Box::new(stream.try_clone());
             let stream = Box::new(stream);
             let (sender, receiver) = mpsc::channel();
-    
+            
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 let output = stream_boxed.as_ref().as_ref().unwrap();
@@ -66,7 +66,7 @@ pub mod standalone {
             self.reader = Option::Some(Reader::new(stream));
             Ok(())
         }
-    
+        
         fn auth(&mut self) -> Result<()> {
             if !self.password.is_empty() {
                 let reader = self.reader.as_ref().unwrap();
@@ -76,20 +76,20 @@ pub mod standalone {
             }
             Ok(())
         }
-    
+        
         fn send_port(&mut self) -> Result<()> {
             let reader = self.reader.as_ref().unwrap();
             let port = reader.stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
-        
+            
             let reader = self.reader.as_ref().unwrap();
             let writer = reader.stream.as_ref();
-        
+            
             send(writer, b"REPLCONF", &[b"listening-port", port])?;
             self.response(rdb::read_bytes)?;
             Ok(())
         }
-    
+        
         fn response(&mut self,
                     func: fn(&mut Reader, isize,
                              &Vec<Box<dyn RdbHandler>>, &Vec<Box<dyn CommandHandler>>,
@@ -198,16 +198,16 @@ pub mod standalone {
         pub fn add_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
             self.cmd_listeners.push(listener)
         }
-    
+        
         fn start_sync(&mut self) -> Result<SyncMode> {
             let offset = self.repl_offset.to_string();
             let repl_offset = offset.as_bytes();
             let repl_id = self.repl_id.as_bytes();
-        
+            
             let reader = self.reader.as_ref().unwrap();
             let writer = reader.stream.as_ref();
             send(writer, b"PSYNC", &[repl_id, repl_offset])?;
-        
+            
             if let Bytes(resp) = self.response(rdb::read_bytes)? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
@@ -230,7 +230,7 @@ pub mod standalone {
             }
             Ok(PSync)
         }
-    
+        
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             // read begin
             self.reader.as_mut().unwrap().mark();
