@@ -276,3 +276,61 @@ pub(crate) fn parse_psetex(iter: Iter<Vec<u8>>) -> PSETEX {
     let value = args.get(2).unwrap();
     PSETEX { key, milliseconds, value }
 }
+
+#[derive(Debug)]
+pub struct SETRANGE<'a> {
+    pub key: &'a [u8],
+    pub offset: &'a [u8],
+    pub value: &'a [u8],
+}
+
+pub(crate) fn parse_setrange(mut iter: Iter<Vec<u8>>) -> SETRANGE {
+    let key = iter.next().unwrap();
+    let offset = iter.next().unwrap();
+    let value = iter.next().unwrap();
+    SETRANGE { key, offset, value }
+}
+
+#[derive(Debug)]
+pub struct DECR<'a> {
+    pub key: &'a [u8]
+}
+
+pub(crate) fn parse_decr(mut iter: Iter<Vec<u8>>) -> DECR {
+    let key = iter.next().unwrap();
+    DECR { key }
+}
+
+#[derive(Debug)]
+pub struct DECRBY<'a> {
+    pub key: &'a [u8],
+    pub decrement: &'a [u8],
+}
+
+pub(crate) fn parse_decrby(mut iter: Iter<Vec<u8>>) -> DECRBY {
+    let key = iter.next().unwrap();
+    let decrement = iter.next().unwrap();
+    DECRBY { key, decrement }
+}
+
+#[derive(Debug)]
+pub struct INCR<'a> {
+    pub key: &'a [u8]
+}
+
+pub(crate) fn parse_incr(mut iter: Iter<Vec<u8>>) -> INCR {
+    let key = iter.next().unwrap();
+    INCR { key }
+}
+
+#[derive(Debug)]
+pub struct INCRBY<'a> {
+    pub key: &'a [u8],
+    pub increment: &'a [u8],
+}
+
+pub(crate) fn parse_incrby(mut iter: Iter<Vec<u8>>) -> INCRBY {
+    let key = iter.next().unwrap();
+    let increment = iter.next().unwrap();
+    INCRBY { key, increment }
+}
