@@ -290,3 +290,13 @@ pub(crate) fn parse_setrange(mut iter: Iter<Vec<u8>>) -> SETRANGE {
     let value = iter.next().unwrap();
     SETRANGE { key, offset, value }
 }
+
+#[derive(Debug)]
+pub struct DECR<'a> {
+    pub key: &'a [u8]
+}
+
+pub(crate) fn parse_decr(mut iter: Iter<Vec<u8>>) -> DECR {
+    let key = iter.next().unwrap();
+    DECR { key }
+}

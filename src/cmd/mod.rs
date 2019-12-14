@@ -13,6 +13,7 @@ pub enum Command<'a> {
     BITFIELD(&'a BITFIELD<'a>),
     BITOP(&'a BITOP<'a>),
     DEL(&'a DEL<'a>),
+    DECR(&'a DECR<'a>),
     SET(&'a SET<'a>),
     SETEX(&'a SETEX<'a>),
     SETNX(&'a SETNX<'a>),
@@ -50,6 +51,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_del(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::DEL(&cmd))
+                );
+            }
+            "DECR" => {
+                let cmd = strings::parse_decr(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::DECR(&cmd))
                 );
             }
             "SET" => {
