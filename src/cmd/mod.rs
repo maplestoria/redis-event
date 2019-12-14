@@ -1,9 +1,11 @@
 use crate::cmd::keys::*;
+use crate::cmd::sets::*;
 use crate::cmd::strings::*;
 use crate::CommandHandler;
 
-pub mod strings;
 pub mod keys;
+pub mod sets;
+pub mod strings;
 
 #[derive(Debug)]
 pub enum Command<'a> {
@@ -16,6 +18,7 @@ pub enum Command<'a> {
     SETNX(&'a SETNX<'a>),
     PSETEX(&'a PSETEX<'a>),
     SETRANGE(&'a SETRANGE<'a>),
+    SINTERSTORE(&'a SINTERSTORE<'a>),
     PING,
     SELECT(u8),
 }
@@ -77,6 +80,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_setrange(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SETRANGE(&cmd))
+                );
+            }
+            "SINTERSTORE" => {
+                let cmd = sets::parse_sinterstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SINTERSTORE(&cmd))
                 );
             }
             "PING" => cmd_handler.iter().for_each(|handler|

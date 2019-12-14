@@ -288,6 +288,5 @@ pub(crate) fn parse_setrange(mut iter: Iter<Vec<u8>>) -> SETRANGE {
     let key = iter.next().unwrap();
     let offset = iter.next().unwrap();
     let value = iter.next().unwrap();
-    
     SETRANGE { key, offset, value }
 }
