@@ -8,7 +8,7 @@ pub struct DEL<'a> {
     pub keys: Vec<&'a Vec<u8>>
 }
 
-pub(crate) fn parse_del(mut iter: Iter<Vec<u8>>) -> DEL {
+pub(crate) fn parse_del(iter: Iter<Vec<u8>>) -> DEL {
     let mut keys = Vec::new();
     for next_key in iter {
         keys.push(next_key);

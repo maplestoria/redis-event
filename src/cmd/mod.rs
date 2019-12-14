@@ -15,6 +15,7 @@ pub enum Command<'a> {
     SETEX(&'a SETEX<'a>),
     SETNX(&'a SETNX<'a>),
     PSETEX(&'a PSETEX<'a>),
+    SETRANGE(&'a SETRANGE<'a>),
     PING,
     SELECT(u8),
 }
@@ -70,6 +71,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_psetex(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::PSETEX(&cmd))
+                );
+            }
+            "SETRANGE" => {
+                let cmd = strings::parse_setrange(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SETRANGE(&cmd))
                 );
             }
             "PING" => cmd_handler.iter().for_each(|handler|

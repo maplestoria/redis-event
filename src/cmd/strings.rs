@@ -276,3 +276,18 @@ pub(crate) fn parse_psetex(iter: Iter<Vec<u8>>) -> PSETEX {
     let value = args.get(2).unwrap();
     PSETEX { key, milliseconds, value }
 }
+
+#[derive(Debug)]
+pub struct SETRANGE<'a> {
+    pub key: &'a [u8],
+    pub offset: &'a [u8],
+    pub value: &'a [u8],
+}
+
+pub(crate) fn parse_setrange(mut iter: Iter<Vec<u8>>) -> SETRANGE {
+    let key = iter.next().unwrap();
+    let offset = iter.next().unwrap();
+    let value = iter.next().unwrap();
+    
+    SETRANGE { key, offset, value }
+}
