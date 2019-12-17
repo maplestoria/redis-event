@@ -65,48 +65,45 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
     
     let mut statements = Vec::new();
     let mut overflows = Vec::new();
-    loop {
-        if let Some(next_arg) = iter.next() {
-            let arg = to_string(next_arg.to_vec());
-            let arg_upper = &arg.to_uppercase();
-            if arg_upper == "GET" {
-                let _type = iter.next()
-                    .expect("bitfield 缺失get type");
-                let offset = iter.next()
-                    .expect("bitfield 缺失get offset");
-                statements.push(Operation::GET(Get { _type, offset }));
-            } else if arg_upper == "SET" {
-                let _type = iter.next().unwrap();
-                let offset = iter.next()
-                    .expect("bitfield 缺失SET offset");
-                let value = iter.next()
-                    .expect("bitfield 缺失SET offset");
-                statements.push(Operation::SET(Set { _type, offset, value }));
-            } else if arg_upper == "INCRBY" {
-                let _type = iter.next()
-                    .expect("bitfield 缺失INCR type");
-                let offset = iter.next()
-                    .expect("bitfield 缺失INCR offset");
-                let increment = iter.next()
-                    .expect("bitfield 缺失INCR offset");
-                statements.push(Operation::INCRBY(IncrBy { _type, offset, increment }));
-            } else if arg_upper == "OVERFLOW" {
-                let _type = to_string(iter.next()
-                    .expect("bitfield 缺失OVERFLOW type")
-                    .to_vec());
-                let type_upper = &_type.to_uppercase();
-                if type_upper == "FAIL" {
-                    overflows.push(Overflow::FAIL);
-                } else if type_upper == "SAT" {
-                    overflows.push(Overflow::SAT);
-                } else if type_upper == "WRAP" {
-                    overflows.push(Overflow::WRAP);
-                }
+    while let Some(next_arg) = iter.next() {
+        let arg = to_string(next_arg.to_vec());
+        let arg_upper = &arg.to_uppercase();
+        if arg_upper == "GET" {
+            let _type = iter.next()
+                .expect("bitfield 缺失get type");
+            let offset = iter.next()
+                .expect("bitfield 缺失get offset");
+            statements.push(Operation::GET(Get { _type, offset }));
+        } else if arg_upper == "SET" {
+            let _type = iter.next().unwrap();
+            let offset = iter.next()
+                .expect("bitfield 缺失SET offset");
+            let value = iter.next()
+                .expect("bitfield 缺失SET offset");
+            statements.push(Operation::SET(Set { _type, offset, value }));
+        } else if arg_upper == "INCRBY" {
+            let _type = iter.next()
+                .expect("bitfield 缺失INCR type");
+            let offset = iter.next()
+                .expect("bitfield 缺失INCR offset");
+            let increment = iter.next()
+                .expect("bitfield 缺失INCR offset");
+            statements.push(Operation::INCRBY(IncrBy { _type, offset, increment }));
+        } else if arg_upper == "OVERFLOW" {
+            let _type = to_string(iter.next()
+                .expect("bitfield 缺失OVERFLOW type")
+                .to_vec());
+            let type_upper = &_type.to_uppercase();
+            if type_upper == "FAIL" {
+                overflows.push(Overflow::FAIL);
+            } else if type_upper == "SAT" {
+                overflows.push(Overflow::SAT);
+            } else if type_upper == "WRAP" {
+                overflows.push(Overflow::WRAP);
             }
-        } else {
-            break;
         }
     }
+    
     let _statements;
     if statements.is_empty() {
         _statements = None;
@@ -155,12 +152,8 @@ pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
     let dest_key = iter.next().unwrap();
     
     let mut keys = Vec::new();
-    loop {
-        if let Some(next_arg) = iter.next() {
-            keys.push(next_arg);
-        } else {
-            break;
-        }
+    while let Some(next_arg) = iter.next() {
+        keys.push(next_arg);
     }
     if keys.is_empty() {
         panic!("bitop命令缺失input key")
@@ -343,13 +336,9 @@ pub struct MSET<'a> {
 
 pub(crate) fn parse_mset(mut iter: Iter<Vec<u8>>) -> MSET {
     let mut key_values = Vec::new();
-    loop {
-        if let Some(key) = iter.next() {
-            if let Some(value) = iter.next() {
-                key_values.push(KeyValue { key, value });
-            }
-        } else {
-            break;
+    while let Some(key) = iter.next() {
+        if let Some(value) = iter.next() {
+            key_values.push(KeyValue { key, value });
         }
     }
     if key_values.is_empty() {
@@ -365,13 +354,9 @@ pub struct MSETNX<'a> {
 
 pub(crate) fn parse_msetnx(mut iter: Iter<Vec<u8>>) -> MSETNX {
     let mut key_values = Vec::new();
-    loop {
-        if let Some(key) = iter.next() {
-            if let Some(value) = iter.next() {
-                key_values.push(KeyValue { key, value });
-            }
-        } else {
-            break;
+    while let Some(key) = iter.next() {
+        if let Some(value) = iter.next() {
+            key_values.push(KeyValue { key, value });
         }
     }
     if key_values.is_empty() {
