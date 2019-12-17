@@ -12,33 +12,37 @@ pub enum Command<'a> {
     APPEND(&'a APPEND<'a>),
     BITFIELD(&'a BITFIELD<'a>),
     BITOP(&'a BITOP<'a>),
-    DEL(&'a DEL<'a>),
     DECR(&'a DECR<'a>),
     DECRBY(&'a DECRBY<'a>),
+    DEL(&'a DEL<'a>),
     EXPIRE(&'a EXPIRE<'a>),
     EXPIREAT(&'a EXPIREAT<'a>),
     INCR(&'a INCR<'a>),
     INCRBY(&'a INCRBY<'a>),
-    SET(&'a SET<'a>),
-    SORT(&'a SORT<'a>),
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
     RENAME(&'a RENAME<'a>),
     RENAMENX(&'a RENAMENX<'a>),
     RESTORE(&'a RESTORE<'a>),
-    SETEX(&'a SETEX<'a>),
+    SADD(&'a SADD<'a>),
+    SDIFFSTORE(&'a SDIFFSTORE<'a>),
+    SET(&'a SET<'a>),
     SETBIT(&'a SETBIT<'a>),
+    SETEX(&'a SETEX<'a>),
     SETNX(&'a SETNX<'a>),
+    SELECT(u8),
+    SETRANGE(&'a SETRANGE<'a>),
+    SINTERSTORE(&'a SINTERSTORE<'a>),
+    SMOVE(&'a SMOVE<'a>),
+    SORT(&'a SORT<'a>),
+    SREM(&'a SREM<'a>),
+    PING,
     PERSIST(&'a PERSIST<'a>),
     PEXPIRE(&'a PEXPIRE<'a>),
     PEXPIREAT(&'a PEXPIREAT<'a>),
     PSETEX(&'a PSETEX<'a>),
-    SETRANGE(&'a SETRANGE<'a>),
-    SINTERSTORE(&'a SINTERSTORE<'a>),
     UNLINK(&'a UNLINK<'a>),
-    PING,
-    SELECT(u8),
 }
 
 pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler>>) {
@@ -124,6 +128,24 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::RESTORE(&cmd))
                 );
             }
+            "SADD" => {
+                let cmd = sets::parse_sadd(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SADD(&cmd))
+                );
+            }
+            "SDIFFSTORE" => {
+                let cmd = sets::parse_sdiffstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SDIFFSTORE(&cmd))
+                );
+            }
+            "SMOVE" => {
+                let cmd = sets::parse_smove(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SMOVE(&cmd))
+                );
+            }
             "SET" => {
                 let cmd = strings::parse_set(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -141,6 +163,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_sort(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SORT(&cmd))
+                );
+            }
+            "SREM" => {
+                let cmd = sets::parse_srem(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SREM(&cmd))
                 );
             }
             "UNLINK" => {
