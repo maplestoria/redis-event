@@ -20,6 +20,7 @@ pub enum Command<'a> {
     INCR(&'a INCR<'a>),
     INCRBY(&'a INCRBY<'a>),
     SET(&'a SET<'a>),
+    SORT(&'a SORT<'a>),
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
@@ -133,6 +134,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let db = db.parse::<u8>().unwrap();
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SELECT(db))
+                );
+            }
+            "SORT" => {
+                let cmd = keys::parse_sort(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SORT(&cmd))
                 );
             }
             "MOVE" => {
