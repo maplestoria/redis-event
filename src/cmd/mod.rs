@@ -36,6 +36,7 @@ pub enum Command<'a> {
     PSETEX(&'a PSETEX<'a>),
     SETRANGE(&'a SETRANGE<'a>),
     SINTERSTORE(&'a SINTERSTORE<'a>),
+    UNLINK(&'a UNLINK<'a>),
     PING,
     SELECT(u8),
 }
@@ -140,6 +141,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_sort(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SORT(&cmd))
+                );
+            }
+            "UNLINK" => {
+                let cmd = keys::parse_unlink(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::UNLINK(&cmd))
                 );
             }
             "MOVE" => {

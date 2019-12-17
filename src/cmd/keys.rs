@@ -224,3 +224,16 @@ pub(crate) fn parse_sort(mut iter: Iter<Vec<u8>>) -> SORT {
         destination,
     }
 }
+
+#[derive(Debug)]
+pub struct UNLINK<'a> {
+    pub keys: Vec<&'a [u8]>
+}
+
+pub(crate) fn parse_unlink(mut iter: Iter<Vec<u8>>) -> UNLINK {
+    let mut keys = Vec::new();
+    while let Some(next_key) = iter.next() {
+        keys.push(next_key.as_slice());
+    }
+    UNLINK { keys }
+}
