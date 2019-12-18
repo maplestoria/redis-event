@@ -288,7 +288,7 @@ pub struct List<'a> {
 
 pub struct Set<'a> {
     pub key: &'a [u8],
-    pub values: &'a [Vec<u8>],
+    pub members: &'a [Vec<u8>],
 }
 
 pub struct SortedSet<'a> {
@@ -298,7 +298,7 @@ pub struct SortedSet<'a> {
 
 #[derive(Debug)]
 pub struct Item {
-    pub element: Vec<u8>,
+    pub member: Vec<u8>,
     pub score: f64,
 }
 

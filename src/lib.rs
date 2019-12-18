@@ -49,7 +49,7 @@ impl RdbHandler for EchoRdbHandler {
                 println!("{:?}={:?}", list.key, list.values);
             }
             Object::Set(set) => {
-                println!("{:?}={:?}", set.key, set.values);
+                println!("{:?}={:?}", set.key, set.members);
             }
             Object::SortedSet(set) => {
                 println!("{:?}={:?}", set.key, set.items);

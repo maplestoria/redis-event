@@ -105,7 +105,7 @@ pub(crate) struct SortedSetIter<'a> {
 impl SortedSetIter<'_> {
     pub(crate) fn next(&mut self) -> io::Result<Item> {
         if self.count > 0 {
-            let element = self.input.read_string()?;
+            let member = self.input.read_string()?;
             let score;
             if self.v == 1 {
                 score = self.input.read_double()?;
@@ -115,7 +115,7 @@ impl SortedSetIter<'_> {
                 score = score_i64 as f64;
             }
             self.count -= 1;
-            return Ok(Item { element, score });
+            return Ok(Item { member, score });
         }
         Err(Error::new(ErrorKind::NotFound, "No element left"))
     }

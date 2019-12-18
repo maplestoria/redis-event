@@ -47,6 +47,10 @@ pub enum Command<'a> {
     PSETEX(&'a PSETEX<'a>),
     UNLINK(&'a UNLINK<'a>),
     ZADD(&'a ZADD<'a>),
+    ZINCRBY(&'a ZINCRBY<'a>),
+    ZINTERSTORE(&'a ZINTERSTORE<'a>),
+    ZPOPMAX(&'a ZPOPMAX<'a>),
+    ZPOPMIN(&'a ZPOPMIN<'a>),
 }
 
 pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler>>) {
@@ -263,6 +267,30 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = sorted_sets::parse_zadd(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::ZADD(&cmd))
+                );
+            }
+            "ZINCRBY" => {
+                let cmd = sorted_sets::parse_zincrby(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZINCRBY(&cmd))
+                );
+            }
+            "ZINTERSTORE" => {
+                let cmd = sorted_sets::parse_zinterstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZINTERSTORE(&cmd))
+                );
+            }
+            "ZPOPMAX" => {
+                let cmd = sorted_sets::parse_zpopmax(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZPOPMAX(&cmd))
+                );
+            }
+            "ZPOPMIN" => {
+                let cmd = sorted_sets::parse_zpopmin(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZPOPMIN(&cmd))
                 );
             }
             "PING" => cmd_handler.iter().for_each(|handler|
