@@ -293,11 +293,11 @@ pub struct Set<'a> {
 
 pub struct SortedSet<'a> {
     pub key: &'a [u8],
-    pub values: &'a [Element],
+    pub items: &'a [Item],
 }
 
 #[derive(Debug)]
-pub struct Element {
+pub struct Item {
     pub element: Vec<u8>,
     pub score: f64,
 }

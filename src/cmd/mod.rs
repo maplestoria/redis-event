@@ -1,10 +1,12 @@
 use crate::{CommandHandler, to_string};
 use crate::cmd::keys::*;
 use crate::cmd::sets::*;
+use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
 
 pub mod keys;
 pub mod sets;
+pub mod sorted_sets;
 pub mod strings;
 
 #[derive(Debug)]
@@ -44,6 +46,7 @@ pub enum Command<'a> {
     PEXPIREAT(&'a PEXPIREAT<'a>),
     PSETEX(&'a PSETEX<'a>),
     UNLINK(&'a UNLINK<'a>),
+    ZADD(&'a ZADD<'a>),
 }
 
 pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler>>) {
@@ -254,6 +257,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = sets::parse_sinterstore(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SINTERSTORE(&cmd))
+                );
+            }
+            "ZADD" => {
+                let cmd = sorted_sets::parse_zadd(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZADD(&cmd))
                 );
             }
             "PING" => cmd_handler.iter().for_each(|handler|

@@ -259,7 +259,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -279,7 +279,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
                 }
             }
             RDB_TYPE_HASH => {
@@ -419,14 +419,14 @@ impl Reader {
                             } else {
                                 return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
                             }
-                            val.push(Element { element, score });
+                            val.push(Item { element, score });
                         } else {
                             has_more = false;
                             break;
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
                 }
             }
             RDB_TYPE_SET_INTSET => {
