@@ -1,8 +1,8 @@
-use crate::{CommandHandler, to_string};
 use crate::cmd::keys::*;
 use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
+use crate::CommandHandler;
 
 pub mod keys;
 pub mod sets;
@@ -161,7 +161,7 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 );
             }
             "SELECT" => {
-                let db = to_string(iter.next().unwrap().to_vec());
+                let db = String::from_utf8_lossy(iter.next().unwrap());
                 let db = db.parse::<u8>().unwrap();
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SELECT(db))
