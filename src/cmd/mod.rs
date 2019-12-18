@@ -37,6 +37,7 @@ pub enum Command<'a> {
     SMOVE(&'a SMOVE<'a>),
     SORT(&'a SORT<'a>),
     SREM(&'a SREM<'a>),
+    SUNIONSTORE(&'a SUNIONSTORE<'a>),
     PING,
     PERSIST(&'a PERSIST<'a>),
     PEXPIRE(&'a PEXPIRE<'a>),
@@ -169,6 +170,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = sets::parse_srem(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SREM(&cmd))
+                );
+            }
+            "SUNIONSTORE" => {
+                let cmd = sets::parse_sunionstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SUNIONSTORE(&cmd))
                 );
             }
             "UNLINK" => {
