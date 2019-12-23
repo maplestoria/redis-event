@@ -51,6 +51,11 @@ pub enum Command<'a> {
     ZINTERSTORE(&'a ZINTERSTORE<'a>),
     ZPOPMAX(&'a ZPOPMAX<'a>),
     ZPOPMIN(&'a ZPOPMIN<'a>),
+    ZREM(&'a ZREM<'a>),
+    ZREMRANGEBYLEX(&'a ZREMRANGEBYLEX<'a>),
+    ZREMRANGEBYRANK(&'a ZREMRANGEBYRANK<'a>),
+    ZREMRANGEBYSCORE(&'a ZREMRANGEBYSCORE<'a>),
+    ZUNIONSTORE(&'a ZUNIONSTORE<'a>),
 }
 
 pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler>>) {
@@ -291,6 +296,36 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = sorted_sets::parse_zpopmin(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::ZPOPMIN(&cmd))
+                );
+            }
+            "ZREM" => {
+                let cmd = sorted_sets::parse_zrem(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREM(&cmd))
+                );
+            }
+            "ZREMRANGEBYLEX" => {
+                let cmd = sorted_sets::parse_zremrangebylex(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREMRANGEBYLEX(&cmd))
+                );
+            }
+            "ZREMRANGEBYRANK" => {
+                let cmd = sorted_sets::parse_zremrangebyrank(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREMRANGEBYRANK(&cmd))
+                );
+            }
+            "ZREMRANGEBYSCORE" => {
+                let cmd = sorted_sets::parse_zremrangebyscore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREMRANGEBYSCORE(&cmd))
+                );
+            }
+            "ZUNIONSTORE" => {
+                let cmd = sorted_sets::parse_zunionstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZUNIONSTORE(&cmd))
                 );
             }
             "PING" => cmd_handler.iter().for_each(|handler|
