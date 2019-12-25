@@ -1,10 +1,12 @@
 use crate::cmd::keys::*;
+use crate::cmd::lists::*;
 use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
 use crate::CommandHandler;
 
 pub mod keys;
+pub mod lists;
 pub mod sets;
 pub mod sorted_sets;
 pub mod strings;
@@ -14,6 +16,7 @@ pub enum Command<'a> {
     APPEND(&'a APPEND<'a>),
     BITFIELD(&'a BITFIELD<'a>),
     BITOP(&'a BITOP<'a>),
+    BRPOPLPUSH(&'a BRPOPLPUSH<'a>),
     DECR(&'a DECR<'a>),
     DECRBY(&'a DECRBY<'a>),
     DEL(&'a DEL<'a>),
@@ -21,12 +24,23 @@ pub enum Command<'a> {
     EXPIREAT(&'a EXPIREAT<'a>),
     INCR(&'a INCR<'a>),
     INCRBY(&'a INCRBY<'a>),
+    LINSERT(&'a LINSERT<'a>),
+    LPOP(&'a LPOP<'a>),
+    LPUSH(&'a LPUSH<'a>),
+    LPUSHX(&'a LPUSHX<'a>),
+    LREM(&'a LREM<'a>),
+    LSET(&'a LSET<'a>),
+    LTRIM(&'a LTRIM<'a>),
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
     RENAME(&'a RENAME<'a>),
     RENAMENX(&'a RENAMENX<'a>),
     RESTORE(&'a RESTORE<'a>),
+    RPOP(&'a RPOP<'a>),
+    RPOPLPUSH(&'a RPOPLPUSH<'a>),
+    RPUSH(&'a RPUSH<'a>),
+    RPUSHX(&'a RPUSHX<'a>),
     SADD(&'a SADD<'a>),
     SDIFFSTORE(&'a SDIFFSTORE<'a>),
     SET(&'a SET<'a>),
@@ -81,6 +95,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::BITOP(&cmd))
                 );
             }
+            "BRPOPLPUSH" => {
+                let cmd = lists::parse_brpoplpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::BRPOPLPUSH(&cmd))
+                );
+            }
             "DEL" => {
                 let cmd = keys::parse_del(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -123,6 +143,48 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::INCRBY(&cmd))
                 );
             }
+            "LINSERT" => {
+                let cmd = lists::parse_linsert(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LINSERT(&cmd))
+                );
+            }
+            "LPOP" => {
+                let cmd = lists::parse_lpop(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LPOP(&cmd))
+                );
+            }
+            "LPUSH" => {
+                let cmd = lists::parse_lpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LPUSH(&cmd))
+                );
+            }
+            "LPUSHX" => {
+                let cmd = lists::parse_lpushx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LPUSHX(&cmd))
+                );
+            }
+            "LREM" => {
+                let cmd = lists::parse_lrem(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LREM(&cmd))
+                );
+            }
+            "LSET" => {
+                let cmd = lists::parse_lset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LSET(&cmd))
+                );
+            }
+            "LTRIM" => {
+                let cmd = lists::parse_ltrim(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LTRIM(&cmd))
+                );
+            }
             "RENAME" => {
                 let cmd = keys::parse_rename(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -139,6 +201,30 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_restore(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::RESTORE(&cmd))
+                );
+            }
+            "RPOP" => {
+                let cmd = lists::parse_rpop(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPOP(&cmd))
+                );
+            }
+            "RPOPLPUSH" => {
+                let cmd = lists::parse_rpoplpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPOPLPUSH(&cmd))
+                );
+            }
+            "RPUSH" => {
+                let cmd = lists::parse_rpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPUSH(&cmd))
+                );
+            }
+            "RPUSHX" => {
+                let cmd = lists::parse_rpushx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPUSHX(&cmd))
                 );
             }
             "SADD" => {
