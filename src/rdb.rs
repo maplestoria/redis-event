@@ -93,7 +93,7 @@ pub(crate) fn parse(input: &mut Reader,
     input.read_exact(&mut bytes)?;
     // 4个字节: rdb版本
     input.read_exact(&mut bytes[..=3])?;
-    let rdb_version = to_string(bytes[..=3].to_vec());
+    let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
     let rdb_version = rdb_version.parse::<isize>().unwrap();
     loop {
         let data_type = input.read_u8()?;
@@ -288,17 +288,17 @@ pub struct List<'a> {
 
 pub struct Set<'a> {
     pub key: &'a [u8],
-    pub values: &'a [Vec<u8>],
+    pub members: &'a [Vec<u8>],
 }
 
 pub struct SortedSet<'a> {
     pub key: &'a [u8],
-    pub values: &'a [Element],
+    pub items: &'a [Item],
 }
 
 #[derive(Debug)]
-pub struct Element {
-    pub element: Vec<u8>,
+pub struct Item {
+    pub member: Vec<u8>,
     pub score: f64,
 }
 

@@ -238,7 +238,7 @@ impl Reader {
                             handler.handle(Object::List(List { key: &key, values: &val })));
                     } else {
                         rdb_handlers.iter().for_each(|handler|
-                            handler.handle(Object::Set(Set { key: &key, values: &val })));
+                            handler.handle(Object::Set(Set { key: &key, members: &val })));
                     }
                 }
             }
@@ -259,7 +259,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -279,7 +279,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
                 }
             }
             RDB_TYPE_HASH => {
@@ -409,24 +409,24 @@ impl Reader {
                 while has_more {
                     let mut val = Vec::new();
                     for _ in 0..BATCH_SIZE {
-                        let element;
+                        let member;
                         let score: f64;
                         if let Ok(next_val) = iter.next() {
-                            element = next_val;
+                            member = next_val;
                             if let Ok(next_val) = iter.next() {
                                 let score_str = to_string(next_val);
                                 score = score_str.parse::<f64>().unwrap();
                             } else {
                                 return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
                             }
-                            val.push(Element { element, score });
+                            val.push(Item { member, score });
                         } else {
                             has_more = false;
                             break;
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, values: &val })));
+                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -449,7 +449,7 @@ impl Reader {
                         }
                     }
                     rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Set(Set { key: &key, values: &val })));
+                        handler.handle(Object::Set(Set { key: &key, members: &val })));
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {

@@ -1,10 +1,16 @@
-use crate::{CommandHandler, to_string};
+use crate::cmd::hashes::*;
 use crate::cmd::keys::*;
+use crate::cmd::lists::*;
 use crate::cmd::sets::*;
+use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
+use crate::CommandHandler;
 
+pub mod hashes;
 pub mod keys;
+pub mod lists;
 pub mod sets;
+pub mod sorted_sets;
 pub mod strings;
 
 #[derive(Debug)]
@@ -12,19 +18,36 @@ pub enum Command<'a> {
     APPEND(&'a APPEND<'a>),
     BITFIELD(&'a BITFIELD<'a>),
     BITOP(&'a BITOP<'a>),
+    BRPOPLPUSH(&'a BRPOPLPUSH<'a>),
     DECR(&'a DECR<'a>),
     DECRBY(&'a DECRBY<'a>),
     DEL(&'a DEL<'a>),
     EXPIRE(&'a EXPIRE<'a>),
     EXPIREAT(&'a EXPIREAT<'a>),
+    HDEL(&'a HDEL<'a>),
+    HINCRBY(&'a HINCRBY<'a>),
+    HMSET(&'a HMSET<'a>),
+    HSET(&'a HSET<'a>),
+    HSETNX(&'a HSETNX<'a>),
     INCR(&'a INCR<'a>),
     INCRBY(&'a INCRBY<'a>),
+    LINSERT(&'a LINSERT<'a>),
+    LPOP(&'a LPOP<'a>),
+    LPUSH(&'a LPUSH<'a>),
+    LPUSHX(&'a LPUSHX<'a>),
+    LREM(&'a LREM<'a>),
+    LSET(&'a LSET<'a>),
+    LTRIM(&'a LTRIM<'a>),
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
     RENAME(&'a RENAME<'a>),
     RENAMENX(&'a RENAMENX<'a>),
     RESTORE(&'a RESTORE<'a>),
+    RPOP(&'a RPOP<'a>),
+    RPOPLPUSH(&'a RPOPLPUSH<'a>),
+    RPUSH(&'a RPUSH<'a>),
+    RPUSHX(&'a RPUSHX<'a>),
     SADD(&'a SADD<'a>),
     SDIFFSTORE(&'a SDIFFSTORE<'a>),
     SET(&'a SET<'a>),
@@ -44,6 +67,16 @@ pub enum Command<'a> {
     PEXPIREAT(&'a PEXPIREAT<'a>),
     PSETEX(&'a PSETEX<'a>),
     UNLINK(&'a UNLINK<'a>),
+    ZADD(&'a ZADD<'a>),
+    ZINCRBY(&'a ZINCRBY<'a>),
+    ZINTERSTORE(&'a ZINTERSTORE<'a>),
+    ZPOPMAX(&'a ZPOPMAX<'a>),
+    ZPOPMIN(&'a ZPOPMIN<'a>),
+    ZREM(&'a ZREM<'a>),
+    ZREMRANGEBYLEX(&'a ZREMRANGEBYLEX<'a>),
+    ZREMRANGEBYRANK(&'a ZREMRANGEBYRANK<'a>),
+    ZREMRANGEBYSCORE(&'a ZREMRANGEBYSCORE<'a>),
+    ZUNIONSTORE(&'a ZUNIONSTORE<'a>),
 }
 
 pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler>>) {
@@ -67,6 +100,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_bitop(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::BITOP(&cmd))
+                );
+            }
+            "BRPOPLPUSH" => {
+                let cmd = lists::parse_brpoplpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::BRPOPLPUSH(&cmd))
                 );
             }
             "DEL" => {
@@ -99,6 +138,36 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::EXPIREAT(&cmd))
                 );
             }
+            "HDEL" => {
+                let cmd = hashes::parse_hdel(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HDEL(&cmd))
+                );
+            }
+            "HINCRBY" => {
+                let cmd = hashes::parse_hincrby(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HINCRBY(&cmd))
+                );
+            }
+            "HMSET" => {
+                let cmd = hashes::parse_hmset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HMSET(&cmd))
+                );
+            }
+            "HSET" => {
+                let cmd = hashes::parse_hset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HSET(&cmd))
+                );
+            }
+            "HSETNX" => {
+                let cmd = hashes::parse_hsetnx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HSETNX(&cmd))
+                );
+            }
             "INCR" => {
                 let cmd = strings::parse_incr(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -109,6 +178,48 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_incrby(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::INCRBY(&cmd))
+                );
+            }
+            "LINSERT" => {
+                let cmd = lists::parse_linsert(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LINSERT(&cmd))
+                );
+            }
+            "LPOP" => {
+                let cmd = lists::parse_lpop(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LPOP(&cmd))
+                );
+            }
+            "LPUSH" => {
+                let cmd = lists::parse_lpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LPUSH(&cmd))
+                );
+            }
+            "LPUSHX" => {
+                let cmd = lists::parse_lpushx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LPUSHX(&cmd))
+                );
+            }
+            "LREM" => {
+                let cmd = lists::parse_lrem(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LREM(&cmd))
+                );
+            }
+            "LSET" => {
+                let cmd = lists::parse_lset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LSET(&cmd))
+                );
+            }
+            "LTRIM" => {
+                let cmd = lists::parse_ltrim(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::LTRIM(&cmd))
                 );
             }
             "RENAME" => {
@@ -127,6 +238,30 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_restore(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::RESTORE(&cmd))
+                );
+            }
+            "RPOP" => {
+                let cmd = lists::parse_rpop(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPOP(&cmd))
+                );
+            }
+            "RPOPLPUSH" => {
+                let cmd = lists::parse_rpoplpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPOPLPUSH(&cmd))
+                );
+            }
+            "RPUSH" => {
+                let cmd = lists::parse_rpush(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPUSH(&cmd))
+                );
+            }
+            "RPUSHX" => {
+                let cmd = lists::parse_rpushx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::RPUSHX(&cmd))
                 );
             }
             "SADD" => {
@@ -154,7 +289,7 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 );
             }
             "SELECT" => {
-                let db = to_string(iter.next().unwrap().to_vec());
+                let db = String::from_utf8_lossy(iter.next().unwrap());
                 let db = db.parse::<u8>().unwrap();
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SELECT(db))
@@ -254,6 +389,66 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = sets::parse_sinterstore(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SINTERSTORE(&cmd))
+                );
+            }
+            "ZADD" => {
+                let cmd = sorted_sets::parse_zadd(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZADD(&cmd))
+                );
+            }
+            "ZINCRBY" => {
+                let cmd = sorted_sets::parse_zincrby(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZINCRBY(&cmd))
+                );
+            }
+            "ZINTERSTORE" => {
+                let cmd = sorted_sets::parse_zinterstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZINTERSTORE(&cmd))
+                );
+            }
+            "ZPOPMAX" => {
+                let cmd = sorted_sets::parse_zpopmax(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZPOPMAX(&cmd))
+                );
+            }
+            "ZPOPMIN" => {
+                let cmd = sorted_sets::parse_zpopmin(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZPOPMIN(&cmd))
+                );
+            }
+            "ZREM" => {
+                let cmd = sorted_sets::parse_zrem(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREM(&cmd))
+                );
+            }
+            "ZREMRANGEBYLEX" => {
+                let cmd = sorted_sets::parse_zremrangebylex(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREMRANGEBYLEX(&cmd))
+                );
+            }
+            "ZREMRANGEBYRANK" => {
+                let cmd = sorted_sets::parse_zremrangebyrank(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREMRANGEBYRANK(&cmd))
+                );
+            }
+            "ZREMRANGEBYSCORE" => {
+                let cmd = sorted_sets::parse_zremrangebyscore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZREMRANGEBYSCORE(&cmd))
+                );
+            }
+            "ZUNIONSTORE" => {
+                let cmd = sorted_sets::parse_zunionstore(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::ZUNIONSTORE(&cmd))
                 );
             }
             "PING" => cmd_handler.iter().for_each(|handler|

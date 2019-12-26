@@ -2,7 +2,6 @@ use core::slice::Iter;
 
 use crate::cmd::strings::Op::{AND, NOT, OR, XOR};
 use crate::rdb::KeyValue;
-use crate::to_string;
 
 /// 这个模块处理Strings相关的命令
 /// 所有涉及到的命令参考https://redis.io/commands#string
@@ -66,8 +65,7 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
     let mut statements = Vec::new();
     let mut overflows = Vec::new();
     while let Some(next_arg) = iter.next() {
-        let arg = to_string(next_arg.to_vec());
-        let arg_upper = &arg.to_uppercase();
+        let arg_upper = &String::from_utf8_lossy(next_arg).to_uppercase();
         if arg_upper == "GET" {
             let _type = iter.next()
                 .expect("bitfield 缺失get type");
@@ -90,9 +88,8 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
                 .expect("bitfield 缺失INCR offset");
             statements.push(Operation::INCRBY(IncrBy { _type, offset, increment }));
         } else if arg_upper == "OVERFLOW" {
-            let _type = to_string(iter.next()
-                .expect("bitfield 缺失OVERFLOW type")
-                .to_vec());
+            let _type = String::from_utf8_lossy(iter.next()
+                .expect("bitfield 缺失OVERFLOW type"));
             let type_upper = &_type.to_uppercase();
             if type_upper == "FAIL" {
                 overflows.push(Overflow::FAIL);
@@ -136,7 +133,7 @@ pub enum Op {
 
 pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
     let operation;
-    let op = to_string(iter.next().unwrap().to_vec())
+    let op = String::from_utf8_lossy(iter.next().unwrap())
         .to_uppercase();
     if &op == "AND" {
         operation = AND;
@@ -196,8 +193,8 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     let mut exist_type = None;
     
     for arg in iter {
-        let arg_string = to_string(arg.to_vec());
-        let p_arg = arg_string.as_str();
+        let arg_string = String::from_utf8_lossy(arg);
+        let p_arg = &arg_string.to_uppercase();
         if p_arg == "EX" {
             expire_type = Some(ExpireType::EX);
         } else if p_arg == "PX" {
@@ -218,20 +215,14 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
 #[derive(Debug)]
 pub struct SETEX<'a> {
     pub key: &'a [u8],
-    pub seconds: i64,
+    pub seconds: &'a [u8],
     pub value: &'a [u8],
 }
 
-pub(crate) fn parse_setex(iter: Iter<Vec<u8>>) -> SETEX {
-    let args = iter.as_slice();
-    if args.len() != 3 {
-        panic!("invalid setnx args len");
-    }
-    let key = args.get(0).unwrap();
-    let seconds = to_string(args[1].to_vec());
-    let seconds = seconds.parse::<i64>()
-        .expect("解析setex命令时间参数错误");
-    let value = args.get(2).unwrap();
+pub(crate) fn parse_setex(mut iter: Iter<Vec<u8>>) -> SETEX {
+    let key = iter.next().unwrap();
+    let seconds = iter.next().unwrap();
+    let value = iter.next().unwrap();
     SETEX { key, seconds, value }
 }
 
@@ -241,33 +232,23 @@ pub struct SETNX<'a> {
     pub value: &'a [u8],
 }
 
-pub(crate) fn parse_setnx(iter: Iter<Vec<u8>>) -> SETNX {
-    let args = iter.as_slice();
-    if args.len() != 2 {
-        panic!("invalid setnx args len");
-    }
-    let key = args.get(0).unwrap();
-    let value = args.get(1).unwrap();
+pub(crate) fn parse_setnx(mut iter: Iter<Vec<u8>>) -> SETNX {
+    let key = iter.next().unwrap();
+    let value = iter.next().unwrap();
     SETNX { key, value }
 }
 
 #[derive(Debug)]
 pub struct PSETEX<'a> {
     pub key: &'a [u8],
-    pub milliseconds: i64,
+    pub milliseconds: &'a [u8],
     pub value: &'a [u8],
 }
 
-pub(crate) fn parse_psetex(iter: Iter<Vec<u8>>) -> PSETEX {
-    let args = iter.as_slice();
-    if args.len() != 3 {
-        panic!("invalid psetex args len");
-    }
-    let key = args.get(0).unwrap();
-    let milliseconds = to_string(args[1].to_vec());
-    let milliseconds = milliseconds.parse::<i64>()
-        .expect("解析psetex命令时间参数错误");
-    let value = args.get(2).unwrap();
+pub(crate) fn parse_psetex(mut iter: Iter<Vec<u8>>) -> PSETEX {
+    let key = iter.next().unwrap();
+    let milliseconds = iter.next().unwrap();
+    let value = iter.next().unwrap();
     PSETEX { key, milliseconds, value }
 }
 
