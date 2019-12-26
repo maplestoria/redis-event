@@ -1,5 +1,6 @@
 use crate::cmd::connection::{SELECT, SWAPDB};
 use crate::cmd::hashes::*;
+use crate::cmd::hyperloglog::{PFADD, PFCOUNT, PFMERGE};
 use crate::cmd::keys::*;
 use crate::cmd::lists::*;
 use crate::cmd::sets::*;
@@ -9,6 +10,7 @@ use crate::CommandHandler;
 
 pub mod connection;
 pub mod hashes;
+pub mod hyperloglog;
 pub mod keys;
 pub mod lists;
 pub mod sets;
@@ -43,6 +45,14 @@ pub enum Command<'a> {
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
+    PING,
+    PERSIST(&'a PERSIST<'a>),
+    PEXPIRE(&'a PEXPIRE<'a>),
+    PEXPIREAT(&'a PEXPIREAT<'a>),
+    PFADD(&'a PFADD<'a>),
+    PFCOUNT(&'a PFCOUNT<'a>),
+    PFMERGE(&'a PFMERGE<'a>),
+    PSETEX(&'a PSETEX<'a>),
     RENAME(&'a RENAME<'a>),
     RENAMENX(&'a RENAMENX<'a>),
     RESTORE(&'a RESTORE<'a>),
@@ -64,11 +74,6 @@ pub enum Command<'a> {
     SREM(&'a SREM<'a>),
     SUNIONSTORE(&'a SUNIONSTORE<'a>),
     SWAPDB(&'a SWAPDB),
-    PING,
-    PERSIST(&'a PERSIST<'a>),
-    PEXPIRE(&'a PEXPIRE<'a>),
-    PEXPIREAT(&'a PEXPIREAT<'a>),
-    PSETEX(&'a PSETEX<'a>),
     UNLINK(&'a UNLINK<'a>),
     ZADD(&'a ZADD<'a>),
     ZINCRBY(&'a ZINCRBY<'a>),
@@ -343,6 +348,24 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_msetnx(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::MSETNX(&cmd))
+                );
+            }
+            "PFADD" => {
+                let cmd = hyperloglog::parse_pfadd(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PFADD(&cmd))
+                );
+            }
+            "PFCOUNT" => {
+                let cmd = hyperloglog::parse_pfcount(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PFCOUNT(&cmd))
+                );
+            }
+            "PFMERGE" => {
+                let cmd = hyperloglog::parse_pfmerge(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PFMERGE(&cmd))
                 );
             }
             "SETEX" => {
