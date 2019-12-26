@@ -1,3 +1,4 @@
+use crate::cmd::hashes::*;
 use crate::cmd::keys::*;
 use crate::cmd::lists::*;
 use crate::cmd::sets::*;
@@ -5,6 +6,7 @@ use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
 use crate::CommandHandler;
 
+pub mod hashes;
 pub mod keys;
 pub mod lists;
 pub mod sets;
@@ -22,6 +24,11 @@ pub enum Command<'a> {
     DEL(&'a DEL<'a>),
     EXPIRE(&'a EXPIRE<'a>),
     EXPIREAT(&'a EXPIREAT<'a>),
+    HDEL(&'a HDEL<'a>),
+    HINCRBY(&'a HINCRBY<'a>),
+    HMSET(&'a HMSET<'a>),
+    HSET(&'a HSET<'a>),
+    HSETNX(&'a HSETNX<'a>),
     INCR(&'a INCR<'a>),
     INCRBY(&'a INCRBY<'a>),
     LINSERT(&'a LINSERT<'a>),
@@ -129,6 +136,36 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_expireat(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::EXPIREAT(&cmd))
+                );
+            }
+            "HDEL" => {
+                let cmd = hashes::parse_hdel(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HDEL(&cmd))
+                );
+            }
+            "HINCRBY" => {
+                let cmd = hashes::parse_hincrby(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HINCRBY(&cmd))
+                );
+            }
+            "HMSET" => {
+                let cmd = hashes::parse_hmset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HMSET(&cmd))
+                );
+            }
+            "HSET" => {
+                let cmd = hashes::parse_hset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HSET(&cmd))
+                );
+            }
+            "HSETNX" => {
+                let cmd = hashes::parse_hsetnx(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::HSETNX(&cmd))
                 );
             }
             "INCR" => {
