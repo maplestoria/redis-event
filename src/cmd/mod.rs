@@ -1,3 +1,4 @@
+use crate::cmd::connection::{SELECT, SWAPDB};
 use crate::cmd::hashes::*;
 use crate::cmd::keys::*;
 use crate::cmd::lists::*;
@@ -6,6 +7,7 @@ use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
 use crate::CommandHandler;
 
+pub mod connection;
 pub mod hashes;
 pub mod keys;
 pub mod lists;
@@ -54,13 +56,14 @@ pub enum Command<'a> {
     SETBIT(&'a SETBIT<'a>),
     SETEX(&'a SETEX<'a>),
     SETNX(&'a SETNX<'a>),
-    SELECT(u8),
+    SELECT(&'a SELECT),
     SETRANGE(&'a SETRANGE<'a>),
     SINTERSTORE(&'a SINTERSTORE<'a>),
     SMOVE(&'a SMOVE<'a>),
     SORT(&'a SORT<'a>),
     SREM(&'a SREM<'a>),
     SUNIONSTORE(&'a SUNIONSTORE<'a>),
+    SWAPDB(&'a SWAPDB),
     PING,
     PERSIST(&'a PERSIST<'a>),
     PEXPIRE(&'a PEXPIRE<'a>),
@@ -289,10 +292,9 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 );
             }
             "SELECT" => {
-                let db = String::from_utf8_lossy(iter.next().unwrap());
-                let db = db.parse::<u8>().unwrap();
+                let cmd = connection::parse_select(iter);
                 cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SELECT(db))
+                    handler.handle(Command::SELECT(&cmd))
                 );
             }
             "SORT" => {
@@ -311,6 +313,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = sets::parse_sunionstore(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::SUNIONSTORE(&cmd))
+                );
+            }
+            "SWAPDB" => {
+                let cmd = connection::parse_swapdb(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::SWAPDB(&cmd))
                 );
             }
             "UNLINK" => {
