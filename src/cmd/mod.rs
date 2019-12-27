@@ -3,6 +3,9 @@ use crate::cmd::hashes::*;
 use crate::cmd::hyperloglog::{PFADD, PFCOUNT, PFMERGE};
 use crate::cmd::keys::*;
 use crate::cmd::lists::*;
+use crate::cmd::pub_sub::PUBLISH;
+use crate::cmd::scripting::{EVAL, EVALSHA, SCRIPTLOAD};
+use crate::cmd::server::FLUSHDB;
 use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
@@ -13,6 +16,9 @@ pub mod hashes;
 pub mod hyperloglog;
 pub mod keys;
 pub mod lists;
+pub mod pub_sub;
+pub mod scripting;
+pub mod server;
 pub mod sets;
 pub mod sorted_sets;
 pub mod strings;
@@ -26,8 +32,13 @@ pub enum Command<'a> {
     DECR(&'a DECR<'a>),
     DECRBY(&'a DECRBY<'a>),
     DEL(&'a DEL<'a>),
+    EVAL(&'a EVAL<'a>),
+    EVALSHA(&'a EVALSHA<'a>),
     EXPIRE(&'a EXPIRE<'a>),
     EXPIREAT(&'a EXPIREAT<'a>),
+    EXEC,
+    FLUSHALL,
+    FLUSHDB(&'a FLUSHDB),
     GETSET(&'a GETSET<'a>),
     HDEL(&'a HDEL<'a>),
     HINCRBY(&'a HINCRBY<'a>),
@@ -46,6 +57,7 @@ pub enum Command<'a> {
     MOVE(&'a MOVE<'a>),
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
+    MULTI,
     PING,
     PERSIST(&'a PERSIST<'a>),
     PEXPIRE(&'a PEXPIRE<'a>),
@@ -54,6 +66,7 @@ pub enum Command<'a> {
     PFCOUNT(&'a PFCOUNT<'a>),
     PFMERGE(&'a PFMERGE<'a>),
     PSETEX(&'a PSETEX<'a>),
+    PUBLISH(&'a PUBLISH<'a>),
     RENAME(&'a RENAME<'a>),
     RENAMENX(&'a RENAMENX<'a>),
     RESTORE(&'a RESTORE<'a>),
@@ -62,6 +75,8 @@ pub enum Command<'a> {
     RPUSH(&'a RPUSH<'a>),
     RPUSHX(&'a RPUSHX<'a>),
     SADD(&'a SADD<'a>),
+    SCRIPTFLUSH,
+    SCRIPTLOAD(&'a SCRIPTLOAD<'a>),
     SDIFFSTORE(&'a SDIFFSTORE<'a>),
     SET(&'a SET<'a>),
     SETBIT(&'a SETBIT<'a>),
@@ -135,6 +150,18 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::DECRBY(&cmd))
                 );
             }
+            "EVAL" => {
+                let cmd = scripting::parse_eval(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::EVAL(&cmd))
+                );
+            }
+            "EVALSHA" => {
+                let cmd = scripting::parse_evalsha(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::EVALSHA(&cmd))
+                );
+            }
             "EXPIRE" => {
                 let cmd = keys::parse_expire(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -145,6 +172,22 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_expireat(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::EXPIREAT(&cmd))
+                );
+            }
+            "EXEC" => {
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::EXEC)
+                );
+            }
+            "FLUSHALL" => {
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::FLUSHALL)
+                );
+            }
+            "FLUSHDB" => {
+                let cmd = server::parse_flushdb(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::FLUSHDB(&cmd))
                 );
             }
             "GETSET" => {
@@ -285,6 +328,20 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::SADD(&cmd))
                 );
             }
+            "SCRIPT" => {
+                let cmd = iter.next().unwrap();
+                let cmd = String::from_utf8_lossy(cmd).to_uppercase();
+                if &cmd == "LOAD" {
+                    let cmd = scripting::parse_script_load(iter);
+                    cmd_handler.iter().for_each(|handler|
+                        handler.handle(Command::SCRIPTLOAD(&cmd))
+                    );
+                } else if &cmd == "FLUSH" {
+                    cmd_handler.iter().for_each(|handler|
+                        handler.handle(Command::SCRIPTFLUSH)
+                    );
+                }
+            }
             "SDIFFSTORE" => {
                 let cmd = sets::parse_sdiffstore(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -357,6 +414,11 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                     handler.handle(Command::MSETNX(&cmd))
                 );
             }
+            "MULTI" => {
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::MULTI)
+                );
+            }
             "PFADD" => {
                 let cmd = hyperloglog::parse_pfadd(iter);
                 cmd_handler.iter().for_each(|handler|
@@ -391,6 +453,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = strings::parse_psetex(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::PSETEX(&cmd))
+                );
+            }
+            "PUBLISH" => {
+                let cmd = pub_sub::parse_publish(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::PUBLISH(&cmd))
                 );
             }
             "PEXPIRE" => {
@@ -495,7 +563,5 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 eprintln!("unknown command: {}", cmd_name);
             }
         };
-    } else {
-        // command not found
     }
 }
