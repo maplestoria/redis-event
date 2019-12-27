@@ -28,6 +28,7 @@ pub enum Command<'a> {
     DEL(&'a DEL<'a>),
     EXPIRE(&'a EXPIRE<'a>),
     EXPIREAT(&'a EXPIREAT<'a>),
+    GETSET(&'a GETSET<'a>),
     HDEL(&'a HDEL<'a>),
     HINCRBY(&'a HINCRBY<'a>),
     HMSET(&'a HMSET<'a>),
@@ -144,6 +145,12 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 let cmd = keys::parse_expireat(iter);
                 cmd_handler.iter().for_each(|handler|
                     handler.handle(Command::EXPIREAT(&cmd))
+                );
+            }
+            "GETSET" => {
+                let cmd = strings::parse_getset(iter);
+                cmd_handler.iter().for_each(|handler|
+                    handler.handle(Command::GETSET(&cmd))
                 );
             }
             "HDEL" => {
@@ -484,7 +491,9 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
             }
             "PING" => cmd_handler.iter().for_each(|handler|
                 handler.handle(Command::PING)),
-            _ => {}
+            _ => {
+                eprintln!("unknown command: {}", cmd_name);
+            }
         };
     } else {
         // command not found

@@ -360,3 +360,15 @@ pub(crate) fn parse_setbit(mut iter: Iter<Vec<u8>>) -> SETBIT {
     let value = iter.next().unwrap();
     SETBIT { key, value, offset }
 }
+
+#[derive(Debug)]
+pub struct GETSET<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
+}
+
+pub(crate) fn parse_getset(mut iter: Iter<Vec<u8>>) -> GETSET {
+    let key = iter.next().unwrap();
+    let value = iter.next().unwrap();
+    GETSET { key, value }
+}
