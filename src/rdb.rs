@@ -4,6 +4,7 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::{CommandHandler, RdbHandler, to_string};
 use crate::cmd::Command;
+use crate::cmd::connection::SELECT;
 use crate::rdb::Data::{Bytes, Empty};
 use crate::reader::Reader;
 
@@ -108,7 +109,7 @@ pub(crate) fn parse(input: &mut Reader,
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
                 cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SELECT(db as u8)));
+                    handler.handle(Command::SELECT(&SELECT { db: db as u8 })));
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;
