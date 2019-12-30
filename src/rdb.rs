@@ -1,4 +1,4 @@
-use std::io::{Cursor, Error, ErrorKind, Read, Result};
+use std::io::{Cursor, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
@@ -179,8 +179,7 @@ pub(crate) fn read_bytes(input: &mut Reader, length: isize,
         if end == b"\r\n" {
             return Ok(Bytes(bytes));
         } else {
-            let err = format!("Expect CRLF after bulk string, but got: {:?}", end);
-            return Err(Error::new(ErrorKind::Other, err));
+            panic!("Expect CRLF after bulk string, but got: {:?}", end);
         }
     } else if length == 0 {
         // length == 0 代表空字符，后面还有CRLF

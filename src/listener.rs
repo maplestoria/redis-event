@@ -54,6 +54,7 @@ pub mod standalone {
                         let offset_bytes = offset_str.as_bytes();
                         if let Err(error) = send(output, b"REPLCONF", &[b"ACK", offset_bytes]) {
                             println!("heartbeat error: {}", error);
+                            break;
                         }
                         timer = Instant::now();
                     }
@@ -121,7 +122,7 @@ pub mod standalone {
                                 return Err(Error::new(ErrorKind::InvalidInput, message));
                             }
                         } else {
-                            return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                            panic!("Expect LF after CR");
                         }
                     }
                     DOLLAR => { // Bulk String
@@ -141,7 +142,7 @@ pub mod standalone {
                             let stream = self.reader.as_mut().unwrap();
                             return func(stream, length, &self.rdb_listeners, &self.cmd_listeners);
                         } else {
-                            return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                            panic!("Expect LF after CR");
                         }
                     }
                     STAR => { // Array
@@ -170,22 +171,20 @@ pub mod standalone {
                                         BytesVec(mut resp) => {
                                             result.append(&mut resp);
                                         }
-                                        Empty => {
-                                            return Err(Error::new(ErrorKind::InvalidData,
-                                                                  "Expect Redis response, but got empty"));
-                                        }
+                                        Empty => panic!("Expect Redis response, but got empty")
                                     }
                                 }
                                 return Ok(BytesVec(result));
                             }
                         } else {
-                            return Err(Error::new(ErrorKind::InvalidData, "Expect LF after CR"));
+                            panic!("Expect LF after CR");
                         }
                     }
-                    LF => {}
+                    LF => {
+                        // 无需处理
+                    }
                     _ => {
-                        let error = format!("expect [$,:,*,+,-] but: {}", response_type);
-                        return Err(Error::new(ErrorKind::InvalidData, error));
+                        panic!("错误的响应类型: {}", response_type);
                     }
                 }
             }
@@ -216,17 +215,17 @@ pub mod standalone {
                     if let Some(repl_id) = iter.nth(1) {
                         self.repl_id = repl_id.to_owned();
                     } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect replication id, bot got None"));
+                        panic!("Expect replication id, bot got None");
                     }
                     if let Some(repl_offset) = iter.next() {
                         self.repl_offset = repl_offset.parse::<i64>().unwrap();
                     } else {
-                        return Err(Error::new(ErrorKind::InvalidData, "Expect replication offset, bot got None"));
+                        panic!("Expect replication offset, bot got None");
                     }
                 }
                 // TODO 其他返回信息的处理
             } else {
-                return Err(Error::new(ErrorKind::InvalidData, "Expect Redis string response"));
+                panic!("Expect Redis string response");
             }
             Ok(PSync)
         }
@@ -272,8 +271,7 @@ pub mod standalone {
             // TODO check sync mode return
             loop {
                 match self.receive_cmd() {
-                    Ok(Data::Bytes(_)) => return Err(Error::new(ErrorKind::InvalidData,
-                                                                "Expect BytesVec response, but got Bytes")),
+                    Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
                     Ok(Data::BytesVec(data)) => {
                         cmd::parse(data, &self.cmd_listeners);
                     }

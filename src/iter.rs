@@ -183,7 +183,7 @@ impl Iter for IntSetIter<'_> {
                     let member = member.to_string().into_bytes();
                     val = member;
                 }
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid integer size")),
+                _ => panic!("Invalid integer size: {}", self.encoding),
             }
             self.count -= 1;
             return Ok(val);

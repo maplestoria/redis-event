@@ -1,5 +1,5 @@
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
-use std::io::{Cursor, Error, ErrorKind, Read, Result};
+use std::io::{Cursor, Read, Result};
 use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
@@ -97,7 +97,7 @@ impl Reader {
             self.marked = false;
             return Ok(len);
         }
-        return Err(Error::new(ErrorKind::Other, "Reader not marked"));
+        panic!("Reader not marked");
     }
     
     // 读取redis响应中下一条数据的长度
@@ -147,7 +147,7 @@ impl Reader {
                 return Ok(cursor.read_i64::<LittleEndian>()? as isize);
             };
         }
-        Err(Error::new(ErrorKind::InvalidData, "Invalid integer size"))
+        panic!("Invalid integer size: {}", size)
     }
     
     // 从流中读取一个string
@@ -176,7 +176,7 @@ impl Reader {
                     lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
                     return Ok(origin);
                 }
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid string length"))
+                _ => panic!("Invalid string length: {}", length)
             };
         };
         let mut buff = vec![0; length as usize];
@@ -295,11 +295,7 @@ impl Reader {
                         let value;
                         if let Ok(next_val) = iter.next() {
                             name = next_val;
-                            if let Ok(next_val) = iter.next() {
-                                value = next_val;
-                            } else {
-                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
-                            }
+                            value = iter.next().expect("missing hash field value");
                             val.push(Field { name, value });
                         } else {
                             has_more = false;
@@ -325,11 +321,7 @@ impl Reader {
                         let value;
                         if let Ok(next_val) = iter.next() {
                             name = next_val;
-                            if let Ok(next_val) = iter.next() {
-                                value = next_val;
-                            } else {
-                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
-                            }
+                            value = iter.next().expect("missing hash field value");
                             val.push(Field { name, value });
                         } else {
                             has_more = false;
@@ -381,11 +373,7 @@ impl Reader {
                         let value;
                         if let Ok(next_val) = iter.next() {
                             name = next_val;
-                            if let Ok(next_val) = iter.next() {
-                                value = next_val;
-                            } else {
-                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
-                            }
+                            value = iter.next().expect("missing hash field value");
                             val.push(Field { name, value });
                         } else {
                             has_more = false;
@@ -413,12 +401,9 @@ impl Reader {
                         let score: f64;
                         if let Ok(next_val) = iter.next() {
                             member = next_val;
-                            if let Ok(next_val) = iter.next() {
-                                let score_str = to_string(next_val);
-                                score = score_str.parse::<f64>().unwrap();
-                            } else {
-                                return Err(Error::new(ErrorKind::InvalidData, "Except hash field value after field name"));
-                            }
+                            let score_str = to_string(iter.next()
+                                .expect("missing sorted set element's score"));
+                            score = score_str.parse::<f64>().unwrap();
                             val.push(Item { member, score });
                         } else {
                             has_more = false;
@@ -481,10 +466,7 @@ impl Reader {
             RDB_TYPE_STREAM_LISTPACKS => {
                 // TODO
             }
-            _ => {
-                let err = format!("unknown data type: {}", value_type);
-                return Err(Error::new(ErrorKind::InvalidData, err));
-            }
+            _ => panic!("unknown data type: {}", value_type)
         }
         Ok(())
     }
