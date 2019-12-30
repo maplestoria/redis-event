@@ -4,7 +4,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::rdb::{Item, read_zip_list_entry, read_zm_len};
-use crate::reader::Reader;
+use crate::conn::Conn;
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -17,7 +17,7 @@ pub trait Iter {
 // 字符串类型的值迭代器
 pub(crate) struct StrValIter<'a> {
     pub(crate) count: isize,
-    pub(crate) input: &'a mut Reader,
+    pub(crate) input: &'a mut Conn,
 }
 
 impl Iter for StrValIter<'_> {
@@ -35,7 +35,7 @@ impl Iter for StrValIter<'_> {
 pub(crate) struct QuickListIter<'a> {
     pub(crate) len: isize,
     pub(crate) count: isize,
-    pub(crate) input: &'a mut Reader,
+    pub(crate) input: &'a mut Conn,
     pub(crate) cursor: Option<Cursor<Vec<u8>>>,
 }
 
@@ -99,7 +99,7 @@ pub(crate) struct SortedSetIter<'a> {
     /// v = 1, zset
     /// v = 2, zset2
     pub(crate) v: u8,
-    pub(crate) input: &'a mut Reader,
+    pub(crate) input: &'a mut Conn,
 }
 
 impl SortedSetIter<'_> {
@@ -110,9 +110,8 @@ impl SortedSetIter<'_> {
             if self.v == 1 {
                 score = self.input.read_double()?;
             } else {
-                // TODO zset2 score处理
-                let score_i64 = self.input.read_i64::<LittleEndian>()?;
-                score = score_i64 as f64;
+                let score_u64 = self.input.read_u64::<LittleEndian>()?;
+                score = f64::from_bits(score_u64);
             }
             self.count -= 1;
             return Ok(Item { member, score });
@@ -184,7 +183,7 @@ impl Iter for IntSetIter<'_> {
                     let member = member.to_string().into_bytes();
                     val = member;
                 }
-                _ => return Err(Error::new(ErrorKind::InvalidData, "Invalid integer size")),
+                _ => panic!("Invalid integer size: {}", self.encoding),
             }
             self.count -= 1;
             return Ok(val);

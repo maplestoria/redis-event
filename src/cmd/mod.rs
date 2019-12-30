@@ -5,7 +5,7 @@ use crate::cmd::keys::*;
 use crate::cmd::lists::*;
 use crate::cmd::pub_sub::PUBLISH;
 use crate::cmd::scripting::{EVAL, EVALSHA, SCRIPTLOAD};
-use crate::cmd::server::FLUSHDB;
+use crate::cmd::server::{FLUSHALL, FLUSHDB};
 use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
@@ -37,7 +37,7 @@ pub enum Command<'a> {
     EXPIRE(&'a EXPIRE<'a>),
     EXPIREAT(&'a EXPIREAT<'a>),
     EXEC,
-    FLUSHALL,
+    FLUSHALL(&'a FLUSHALL),
     FLUSHDB(&'a FLUSHDB),
     GETSET(&'a GETSET<'a>),
     HDEL(&'a HDEL<'a>),
@@ -89,7 +89,7 @@ pub enum Command<'a> {
     SORT(&'a SORT<'a>),
     SREM(&'a SREM<'a>),
     SUNIONSTORE(&'a SUNIONSTORE<'a>),
-    SWAPDB(&'a SWAPDB),
+    SWAPDB(&'a SWAPDB<'a>),
     UNLINK(&'a UNLINK<'a>),
     ZADD(&'a ZADD<'a>),
     ZINCRBY(&'a ZINCRBY<'a>),
@@ -180,8 +180,9 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler
                 );
             }
             "FLUSHALL" => {
+                let cmd = server::parse_flushall(iter);
                 cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::FLUSHALL)
+                    handler.handle(Command::FLUSHALL(&cmd))
                 );
             }
             "FLUSHDB" => {
