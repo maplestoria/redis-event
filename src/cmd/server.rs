@@ -4,11 +4,37 @@ use std::slice::Iter;
 /// 所有涉及到的命令参考https://redis.io/commands#server
 ///
 #[derive(Debug)]
-pub struct FLUSHDB<'a> {
-    pub db: &'a [u8]
+pub struct FLUSHDB {
+    pub _async: Option<bool>
 }
 
 pub(crate) fn parse_flushdb(mut iter: Iter<Vec<u8>>) -> FLUSHDB {
-    let db = iter.next().unwrap();
-    FLUSHDB { db }
+    let mut _async = None;
+    if let Some(next_arg) = iter.next() {
+        let arg_upper = String::from_utf8_lossy(next_arg).to_uppercase();
+        if &arg_upper == "ASYNC" {
+            _async = Some(true);
+        } else {
+            panic!("Invalid argument")
+        }
+    }
+    FLUSHDB { _async }
+}
+
+#[derive(Debug)]
+pub struct FLUSHALL {
+    pub _async: Option<bool>
+}
+
+pub(crate) fn parse_flushall(mut iter: Iter<Vec<u8>>) -> FLUSHALL {
+    let mut _async = None;
+    if let Some(next_arg) = iter.next() {
+        let arg_upper = String::from_utf8_lossy(next_arg).to_uppercase();
+        if &arg_upper == "ASYNC" {
+            _async = Some(true);
+        } else {
+            panic!("Invalid argument")
+        }
+    }
+    FLUSHALL { _async }
 }
