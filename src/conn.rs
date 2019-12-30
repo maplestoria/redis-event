@@ -42,15 +42,15 @@ const RDB_ENC_INT32: isize = 2;
 const RDB_ENC_LZF: isize = 3;
 const BATCH_SIZE: usize = 64;
 
-pub(crate) struct Reader {
+pub(crate) struct Conn {
     pub(crate) stream: Box<TcpStream>,
     len: i64,
     marked: bool,
 }
 
-impl Reader {
-    pub(crate) fn new(stream: Box<TcpStream>) -> Reader {
-        Reader { stream, len: 0, marked: false }
+impl Conn {
+    pub(crate) fn new(stream: Box<TcpStream>) -> Conn {
+        Conn { stream, len: 0, marked: false }
     }
     
     pub(crate) fn read_u8(&mut self) -> Result<u8> {

@@ -6,7 +6,7 @@ use crate::{CommandHandler, RdbHandler, to_string};
 use crate::cmd::Command;
 use crate::cmd::connection::SELECT;
 use crate::rdb::Data::{Bytes, Empty};
-use crate::reader::Reader;
+use crate::conn::Conn;
 
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 pub(crate) const CR: u8 = b'\r';
@@ -84,7 +84,7 @@ pub(crate) enum Data<B, V> {
 }
 
 // 读取、解析rdb
-pub(crate) fn parse(input: &mut Reader,
+pub(crate) fn parse(input: &mut Conn,
                     length: isize,
                     rdb_handlers: &Vec<Box<dyn RdbHandler>>,
                     cmd_handler: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
@@ -168,7 +168,7 @@ pub(crate) fn parse(input: &mut Reader,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut Reader, length: isize,
+pub(crate) fn read_bytes(input: &mut Conn, length: isize,
                          _: &Vec<Box<dyn RdbHandler>>,
                          _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {
