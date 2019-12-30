@@ -110,9 +110,8 @@ impl SortedSetIter<'_> {
             if self.v == 1 {
                 score = self.input.read_double()?;
             } else {
-                // TODO zset2 score处理
-                let score_i64 = self.input.read_i64::<LittleEndian>()?;
-                score = score_i64 as f64;
+                let score_u64 = self.input.read_u64::<LittleEndian>()?;
+                score = f64::from_bits(score_u64);
             }
             self.count -= 1;
             return Ok(Item { member, score });

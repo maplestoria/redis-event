@@ -70,8 +70,8 @@ impl Reader {
         Ok(())
     }
     
-    pub(crate) fn read_i64<T: ByteOrder>(&mut self) -> Result<i64> {
-        let int = self.stream.read_i64::<T>()?;
+    pub(crate) fn read_u64<T: ByteOrder>(&mut self) -> Result<u64> {
+        let int = self.stream.read_u64::<T>()?;
         if self.marked {
             self.len += 8;
         };
