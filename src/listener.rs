@@ -4,14 +4,14 @@ pub mod standalone {
     use std::result::Result::Ok;
     use std::sync::mpsc;
     use std::thread;
+    use std::thread::sleep;
     use std::time::{Duration, Instant};
     
     use crate::{cmd, CommandHandler, config, rdb, RdbHandler, RedisListener, to_string};
     use crate::config::Config;
+    use crate::conn::Conn;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
-    use crate::conn::Conn;
-    use std::thread::sleep;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener<'a> {
@@ -290,6 +290,9 @@ pub mod standalone {
             self.send_port()?;
             while !self.start_sync()? {
                 sleep(Duration::from_secs(5));
+            }
+            if !self.config.aof {
+                return Ok(());
             }
             loop {
                 match self.receive_cmd() {

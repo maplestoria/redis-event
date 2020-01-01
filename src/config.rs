@@ -1,11 +1,11 @@
 pub struct Config {
-    discard_rdb: bool,
-    big_key_threshold: i32,
+    pub discard_rdb: bool,
+    pub aof: bool,
 }
 
 pub fn default() -> Config {
     Config {
         discard_rdb: false,
-        big_key_threshold: 10000,
+        aof: false
     }
 }
