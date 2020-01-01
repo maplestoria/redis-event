@@ -291,6 +291,9 @@ pub mod standalone {
             while !self.start_sync()? {
                 sleep(Duration::from_secs(5));
             }
+            if !self.config.aof {
+                return Ok(());
+            }
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
