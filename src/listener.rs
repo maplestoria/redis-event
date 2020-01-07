@@ -206,7 +206,11 @@ pub mod standalone {
             if let Bytes(resp) = self.response(rdb::read_bytes)? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
-                    self.response(rdb::parse)?;
+                    if self.config.is_discard_rdb {
+                        self.response(rdb::skip)?;
+                    } else {
+                        self.response(rdb::parse)?;
+                    }
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
                         self.config.repl_id = repl_id.to_owned();
@@ -239,7 +243,11 @@ pub mod standalone {
                     let conn = self.conn.as_ref().unwrap();
                     let conn = conn.stream.as_ref();
                     send(conn, b"SYNC", &Vec::new())?;
-                    self.response(rdb::parse)?;
+                    if self.config.is_discard_rdb {
+                        self.response(rdb::skip)?;
+                    } else {
+                        self.response(rdb::parse)?;
+                    }
                     return Ok(true);
                 }
             } else {

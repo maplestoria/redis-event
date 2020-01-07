@@ -5,8 +5,8 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use crate::{CommandHandler, RdbHandler, to_string};
 use crate::cmd::Command;
 use crate::cmd::connection::SELECT;
-use crate::rdb::Data::{Bytes, Empty};
 use crate::conn::Conn;
+use crate::rdb::Data::{Bytes, Empty};
 
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 pub(crate) const CR: u8 = b'\r';
@@ -165,6 +165,16 @@ pub(crate) fn parse(input: &mut Conn,
         };
     };
     Ok(Empty)
+}
+
+// 跳过rdb的字节
+pub(crate) fn skip(input: &mut Conn,
+                   length: isize,
+                   _: &Vec<Box<dyn RdbHandler>>,
+                   _: &Vec<Box<dyn CommandHandler>>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    let stream = input.stream.as_ref();
+    std::io::copy(&mut stream.take(length as u64), &mut std::io::sink())?;
+    Ok(Data::Empty)
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
