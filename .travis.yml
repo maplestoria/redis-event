@@ -5,6 +5,7 @@ addons:
   apt:
     packages:
       - libssl-dev
+      - redis-server
 cache: cargo
 rust:
   - stable
