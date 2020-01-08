@@ -285,7 +285,7 @@ impl Conn {
             RDB_TYPE_HASH => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = StrValIter { count, input: self };
+                let mut iter = StrValIter { count: count * 2, input: self };
                 
                 let mut has_more = true;
                 while has_more {

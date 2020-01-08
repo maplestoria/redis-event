@@ -313,8 +313,11 @@ pub mod standalone {
     
     impl Drop for Listener {
         fn drop(&mut self) {
-            self.sender.as_ref().unwrap().send(Message::Terminate).unwrap();
-            
+            if let Some(sender) = self.sender.as_ref() {
+                if let Err(err) = sender.send(Message::Terminate) {
+                    eprintln!("{}", err)
+                }
+            }
             if let Some(thread) = self.t_heartbeat.thread.take() {
                 if let Err(_) = thread.join() {}
             }
