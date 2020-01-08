@@ -1,14 +1,12 @@
-use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::process::Command;
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
-use redis_event::{RdbHandler, RedisListener};
+use redis_event::RedisListener;
 use redis_event::config::Config;
 use redis_event::listener::standalone;
-use redis_event::rdb::Object;
 
 #[test]
 fn test_parser() {

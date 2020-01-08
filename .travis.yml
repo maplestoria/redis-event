@@ -19,9 +19,6 @@ before_cache: |
     cargo install cargo-tarpaulin
   fi
 
-before_script:
-  - sudo redis-server /etc/redis/redis.conf --port 6379 --requirepass 123456 --daemonize yes
-
 script:
   - cargo clean
   - cargo build
