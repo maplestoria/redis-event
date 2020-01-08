@@ -12,14 +12,15 @@ use redis_event::listener::standalone;
 fn test_parser() {
     let rdbs = ["dictionary.rdb"];
     for rdb in &rdbs {
-        let pid = start_redis_server(rdb);
+        let port:u16 = 16379;
+        let pid = start_redis_server(rdb, port);
         // wait redis to start
         sleep(Duration::from_secs(2));
         let ip = IpAddr::from_str("127.0.0.1").unwrap();
         let conf = Config {
             is_discard_rdb: false,
             is_aof: false,
-            addr: SocketAddr::new(ip, 6379),
+            addr: SocketAddr::new(ip, port),
             password: String::new(),
             repl_id: String::from("?"),
             repl_offset: -1,
@@ -32,11 +33,11 @@ fn test_parser() {
     }
 }
 
-fn start_redis_server(rdb: &str) -> u32 {
+fn start_redis_server(rdb: &str, port: u16) -> u32 {
     // redis-server --port 6379 --daemonize no --dbfilename rdb --dir ./tests/rdb
-    let child = Command::new("redis-server")
+    let child = Command::new("/Users/zhongkx/opt/redis-5.0.6/src/redis-server")
         .arg("--port")
-        .arg("6379")
+        .arg(port.to_string())
         .arg("--daemonize")
         .arg("no")
         .arg("--dbfilename")
