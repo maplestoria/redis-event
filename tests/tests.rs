@@ -390,7 +390,7 @@ fn test_zipmap_big_values() {
 #[serial]
 fn test_zipmap_compress() {
     struct TestRdbHandler {
-        map: HashMap<String, Vec<u8>>
+        map: HashMap<String, String>
     }
     
     impl RdbHandler for TestRdbHandler {
@@ -400,7 +400,8 @@ fn test_zipmap_compress() {
                     assert_eq!("zipmap_compresses_easily", String::from_utf8_lossy(hash.key));
                     for field in hash.fields {
                         let name = String::from_utf8_lossy(&field.name).to_string();
-                        self.map.insert(name, field.value.to_vec());
+                        let val = String::from_utf8_lossy(&field.value).to_string();
+                        self.map.insert(name, val);
                     }
                 }
                 Object::EOR => {
@@ -419,7 +420,7 @@ fn test_zipmap_compress() {
 #[serial]
 fn test_zipmap_not_compress() {
     struct TestRdbHandler {
-        map: HashMap<String, Vec<u8>>
+        map: HashMap<String, String>
     }
     
     impl RdbHandler for TestRdbHandler {
@@ -429,7 +430,8 @@ fn test_zipmap_not_compress() {
                     assert_eq!("zimap_doesnt_compress", String::from_utf8_lossy(hash.key));
                     for field in hash.fields {
                         let name = String::from_utf8_lossy(&field.name).to_string();
-                        self.map.insert(name, field.value.to_vec());
+                        let val = String::from_utf8_lossy(&field.value).to_string();
+                        self.map.insert(name, val);
                     }
                 }
                 Object::EOR => {
@@ -511,8 +513,8 @@ fn start_redis_server(rdb: &str, port: u16) -> u32 {
         .arg(rdb)
         .arg("--dir")
         .arg("./tests/rdb")
-        .arg("--logfile")
-        .arg("./redis.log")
+        .arg("--loglevel")
+        .arg("warning")
         .spawn()
         .expect("failed to start redis-server");
     return child.id();
