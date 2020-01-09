@@ -1,11 +1,10 @@
-pub struct Config {
-    pub discard_rdb: bool,
-    pub aof: bool,
-}
+use std::net::SocketAddr;
 
-pub fn default() -> Config {
-    Config {
-        discard_rdb: false,
-        aof: false
-    }
+pub struct Config {
+    pub is_discard_rdb: bool,
+    pub is_aof: bool,
+    pub addr: SocketAddr,
+    pub password: String,
+    pub repl_id: String,
+    pub repl_offset: i64,
 }

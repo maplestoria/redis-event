@@ -208,20 +208,18 @@ impl Conn {
     }
     
     // 根据传入的数据类型，从流中读取对应类型的数据
-    pub(crate) fn read_object(&mut self, value_type: u8, rdb_handlers: &Vec<Box<dyn RdbHandler>>) -> Result<()> {
+    pub(crate) fn read_object(&mut self, value_type: u8, rdb_handlers: &mut Box<dyn RdbHandler>) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
                 let key = self.read_string()?;
                 let value = self.read_string()?;
-                rdb_handlers.iter().for_each(|handler|
-                    handler.handle(Object::String(KeyValue { key: &key, value: &value }))
-                );
+                rdb_handlers.handle(Object::String(KeyValue { key: &key, value: &value }));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
                 let mut iter = StrValIter { count, input: self };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -234,11 +232,9 @@ impl Conn {
                         }
                     }
                     if value_type == RDB_TYPE_LIST {
-                        rdb_handlers.iter().for_each(|handler|
-                            handler.handle(Object::List(List { key: &key, values: &val })));
+                        rdb_handlers.handle(Object::List(List { key: &key, values: &val }));
                     } else {
-                        rdb_handlers.iter().for_each(|handler|
-                            handler.handle(Object::Set(Set { key: &key, members: &val })));
+                        rdb_handlers.handle(Object::Set(Set { key: &key, members: &val }));
                     }
                 }
             }
@@ -246,7 +242,7 @@ impl Conn {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
                 let mut iter = SortedSetIter { count, v: 1, input: self };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -258,15 +254,14 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val }));
                 }
             }
             RDB_TYPE_ZSET_2 => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
                 let mut iter = SortedSetIter { count, v: 2, input: self };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -278,15 +273,14 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val }));
                 }
             }
             RDB_TYPE_HASH => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = StrValIter { count, input: self };
-    
+                let mut iter = StrValIter { count: count * 2, input: self };
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -302,8 +296,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Hash(Hash { key: &key, fields: &val })));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val }));
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -312,7 +305,7 @@ impl Conn {
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
                 let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -328,8 +321,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Hash(Hash { key: &key, fields: &val })));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val }));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
@@ -340,7 +332,7 @@ impl Conn {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -352,8 +344,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::List(List { key: &key, values: &val })));
+                    rdb_handlers.handle(Object::List(List { key: &key, values: &val }));
                 }
             }
             RDB_TYPE_HASH_ZIPLIST => {
@@ -364,7 +355,7 @@ impl Conn {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -380,8 +371,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Hash(Hash { key: &key, fields: &val })));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val }));
                 }
             }
             RDB_TYPE_ZSET_ZIPLIST => {
@@ -392,7 +382,7 @@ impl Conn {
                 cursor.set_position(8);
                 let count = cursor.read_u16::<LittleEndian>()? as isize;
                 let mut iter = ZipListIter { count, cursor };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -410,8 +400,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::SortedSet(SortedSet { key: &key, items: &val })));
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val }));
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -421,7 +410,7 @@ impl Conn {
                 let encoding = cursor.read_i32::<LittleEndian>()?;
                 let length = cursor.read_u32::<LittleEndian>()?;
                 let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -433,15 +422,14 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::Set(Set { key: &key, members: &val })));
+                    rdb_handlers.handle(Object::Set(Set { key: &key, members: &val }));
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
                 let mut iter = QuickListIter { len: -1, count, input: self, cursor: Option::None };
-    
+                
                 let mut has_more = true;
                 while has_more {
                     let mut val = Vec::new();
@@ -453,8 +441,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.iter().for_each(|handler|
-                        handler.handle(Object::List(List { key: &key, values: &val })));
+                    rdb_handlers.handle(Object::List(List { key: &key, values: &val }));
                 }
             }
             RDB_TYPE_MODULE => {

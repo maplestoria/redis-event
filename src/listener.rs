@@ -1,35 +1,31 @@
 pub mod standalone {
     use std::io::{BufWriter, Error, ErrorKind, Result, Write};
-    use std::net::{SocketAddr, TcpStream};
+    use std::net::TcpStream;
     use std::result::Result::Ok;
     use std::sync::mpsc;
     use std::thread;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
-    use crate::{cmd, CommandHandler, config, rdb, RdbHandler, RedisListener, to_string};
+    use crate::{cmd, CommandHandler, rdb, RdbHandler, RedisListener, to_string, NoOpRdbHandler, NoOpCommandHandler};
     use crate::config::Config;
     use crate::conn::Conn;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
     use crate::rdb::Data::{Bytes, BytesVec, Empty};
     
     // 用于监听单个Redis实例的事件
-    pub struct Listener<'a> {
-        addr: SocketAddr,
-        password: &'a str,
+    pub struct Listener {
         config: Config,
         conn: Option<Conn>,
-        repl_id: String,
-        repl_offset: i64,
-        rdb_listeners: Vec<Box<dyn RdbHandler>>,
-        cmd_listeners: Vec<Box<dyn CommandHandler>>,
+        rdb_listener: Box<dyn RdbHandler>,
+        cmd_listener: Box<dyn CommandHandler>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
     }
     
-    impl Listener<'_> {
+    impl Listener {
         fn connect(&mut self) -> Result<()> {
-            let stream = TcpStream::connect(self.addr)?;
+            let stream = TcpStream::connect(self.config.addr)?;
             println!("connected to server!");
             let stream_boxed = Box::new(stream.try_clone());
             let stream = Box::new(stream);
@@ -69,10 +65,10 @@ pub mod standalone {
         }
         
         fn auth(&mut self) -> Result<()> {
-            if !self.password.is_empty() {
+            if !self.config.password.is_empty() {
                 let conn = self.conn.as_ref().unwrap();
                 let conn = conn.stream.as_ref();
-                send(conn, b"AUTH", &[self.password.as_bytes()])?;
+                send(conn, b"AUTH", &[self.config.password.as_bytes()])?;
                 self.response(rdb::read_bytes)?;
             }
             Ok(())
@@ -93,7 +89,7 @@ pub mod standalone {
         
         fn response(&mut self,
                     func: fn(&mut Conn, isize,
-                             &Vec<Box<dyn RdbHandler>>, &Vec<Box<dyn CommandHandler>>,
+                             &mut Box<dyn RdbHandler>, &mut Box<dyn CommandHandler>,
                     ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
         ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             loop {
@@ -140,7 +136,7 @@ pub mod standalone {
                             let length = to_string(bytes);
                             let length = length.parse::<isize>().unwrap();
                             let stream = self.conn.as_mut().unwrap();
-                            return func(stream, length, &self.rdb_listeners, &self.cmd_listeners);
+                            return func(stream, length, &mut self.rdb_listener, &mut self.cmd_listener);
                         } else {
                             panic!("Expect LF after CR");
                         }
@@ -190,18 +186,18 @@ pub mod standalone {
             }
         }
         
-        pub fn add_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
-            self.rdb_listeners.push(listener)
+        pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
+            self.rdb_listener = listener
         }
         
-        pub fn add_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
-            self.cmd_listeners.push(listener)
+        pub fn set_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
+            self.cmd_listener = listener
         }
         
         fn start_sync(&mut self) -> Result<bool> {
-            let offset = self.repl_offset.to_string();
+            let offset = self.config.repl_offset.to_string();
             let repl_offset = offset.as_bytes();
-            let repl_id = self.repl_id.as_bytes();
+            let repl_id = self.config.repl_id.as_bytes();
             
             let conn = self.conn.as_ref().unwrap();
             let conn = conn.stream.as_ref();
@@ -210,15 +206,19 @@ pub mod standalone {
             if let Bytes(resp) = self.response(rdb::read_bytes)? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
-                    self.response(rdb::parse)?;
+                    if self.config.is_discard_rdb {
+                        self.response(rdb::skip)?;
+                    } else {
+                        self.response(rdb::parse)?;
+                    }
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
-                        self.repl_id = repl_id.to_owned();
+                        self.config.repl_id = repl_id.to_owned();
                     } else {
                         panic!("Expect replication id, bot got None");
                     }
                     if let Some(repl_offset) = iter.next() {
-                        self.repl_offset = repl_offset.parse::<i64>().unwrap();
+                        self.config.repl_offset = repl_offset.parse::<i64>().unwrap();
                     } else {
                         panic!("Expect replication offset, bot got None");
                     }
@@ -227,8 +227,8 @@ pub mod standalone {
                     // PSYNC 继续之前的offset
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
-                        if !repl_id.eq(&self.repl_id) {
-                            self.repl_id = repl_id.to_owned();
+                        if !repl_id.eq(&self.config.repl_id) {
+                            self.config.repl_id = repl_id.to_owned();
                         }
                     }
                     return Ok(true);
@@ -243,7 +243,11 @@ pub mod standalone {
                     let conn = self.conn.as_ref().unwrap();
                     let conn = conn.stream.as_ref();
                     send(conn, b"SYNC", &Vec::new())?;
-                    self.response(rdb::parse)?;
+                    if self.config.is_discard_rdb {
+                        self.response(rdb::skip)?;
+                    } else {
+                        self.response(rdb::parse)?;
+                    }
                     return Ok(true);
                 }
             } else {
@@ -256,8 +260,8 @@ pub mod standalone {
             self.conn.as_mut().unwrap().mark();
             let cmd = self.response(rdb::read_bytes);
             let read_len = self.conn.as_mut().unwrap().unmark()?;
-            self.repl_offset += read_len;
-            self.sender.as_ref().unwrap().send(Message::Some(self.repl_offset)).unwrap();
+            self.config.repl_offset += read_len;
+            self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
             return cmd;
             // read end, and get total bytes read
         }
@@ -283,7 +287,7 @@ pub mod standalone {
         writer.flush()
     }
     
-    impl RedisListener for Listener<'_> {
+    impl RedisListener for Listener {
         fn open(&mut self) -> Result<()> {
             self.connect()?;
             self.auth()?;
@@ -291,13 +295,15 @@ pub mod standalone {
             while !self.start_sync()? {
                 sleep(Duration::from_secs(5));
             }
-            if !self.config.aof {
+            if !self.config.is_aof {
                 return Ok(());
             }
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                    Ok(Data::BytesVec(data)) => cmd::parse(data, &self.cmd_listeners),
+                    Ok(Data::BytesVec(data)) => {
+                        cmd::parse(data, &mut self.cmd_listener);
+                    }
                     Err(err) => return Err(err),
                     Ok(Empty) => {}
                 }
@@ -305,26 +311,25 @@ pub mod standalone {
         }
     }
     
-    impl Drop for Listener<'_> {
+    impl Drop for Listener {
         fn drop(&mut self) {
-            self.sender.as_ref().unwrap().send(Message::Terminate).unwrap();
-            
+            if let Some(sender) = self.sender.as_ref() {
+                if let Err(err) = sender.send(Message::Terminate) {
+                    eprintln!("{}", err)
+                }
+            }
             if let Some(thread) = self.t_heartbeat.thread.take() {
                 if let Err(_) = thread.join() {}
             }
         }
     }
     
-    pub fn new(addr: SocketAddr, password: &str) -> Listener {
+    pub fn new(conf: Config) -> Listener {
         Listener {
-            addr,
-            password,
-            config: config::default(),
+            config: conf,
             conn: Option::None,
-            repl_id: String::from("?"),
-            repl_offset: -1,
-            rdb_listeners: Vec::new(),
-            cmd_listeners: Vec::new(),
+            rdb_listener: Box::new(NoOpRdbHandler{}),
+            cmd_listener: Box::new(NoOpCommandHandler{}),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
         }
