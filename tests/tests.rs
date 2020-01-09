@@ -376,7 +376,7 @@ fn test_zipmap_big_values() {
                     assert_eq!(253, self.map.get("253bytes").unwrap().len());
                     assert_eq!(254, self.map.get("254bytes").unwrap().len());
                     assert_eq!(255, self.map.get("255bytes").unwrap().len());
-                    assert_eq!(300, self.map.get("253bytes").unwrap().len());
+                    assert_eq!(300, self.map.get("300bytes").unwrap().len());
                     assert_eq!(20000, self.map.get("20kbytes").unwrap().len());
                 }
                 _ => {}
