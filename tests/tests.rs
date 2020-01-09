@@ -10,7 +10,7 @@ use serial_test::serial;
 use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener};
 use redis_event::config::Config;
 use redis_event::listener::standalone;
-use redis_event::rdb::{Object, ExpireType};
+use redis_event::rdb::{ExpireType, Object};
 
 #[test]
 #[serial]
@@ -225,14 +225,46 @@ fn test_keys_with_expiry() {
                     let val = String::from_utf8_lossy(kv.value).to_string();
                     assert_eq!("expires_ms_precision", key);
                     assert_eq!("2022-12-25 10:11:12.573 UTC", val);
-                    assert_eq!(ExpireType::Millisecond, kv.meta.expired_type.unwrap());
-                    assert_eq!(1671963072573, kv.meta.expired_time.unwrap());
+                    if let Some(ExpireType::Millisecond) = kv.meta.expired_type {
+                        assert_eq!(1671963072573, kv.meta.expired_time.unwrap());
+                    } else {
+                        panic!("错误的过期类型")
+                    }
                 }
                 _ => {}
             }
         }
     }
     start_redis_test("keys_with_expiry.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_linked_list() {
+    struct TestRdbHandler {
+        list: Vec<String>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::List(list) => {
+                    assert_eq!("force_linkedlist", String::from_utf8_lossy(list.key));
+                    for val in list.values {
+                        let value = String::from_utf8_lossy(val).to_string();
+                        self.list.push(value);
+                    }
+                }
+                Object::EOR => {
+                    assert_eq!(1000, self.list.len());
+                    assert_eq!("41PJSO2KRV6SK1WJ6936L06YQDPV68R5J2TAZO3YAR5IL5GUI8", self.list.get(0).unwrap());
+                    assert_eq!("E41JRQX2DB4P1AQZI86BAT7NHPBHPRIIHQKA4UXG94ELZZ7P3Y", self.list.get(1).unwrap());
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("linkedlist.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
 }
 
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
