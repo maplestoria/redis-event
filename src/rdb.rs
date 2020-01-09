@@ -3,8 +3,6 @@ use std::io::{Cursor, Read, Result};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::{CommandHandler, RdbHandler, to_string};
-use crate::cmd::Command;
-use crate::cmd::connection::SELECT;
 use crate::conn::Conn;
 use crate::rdb::Data::{Bytes, Empty};
 
@@ -87,8 +85,9 @@ pub(crate) enum Data<B, V> {
 pub(crate) fn parse(input: &mut Conn,
                     length: isize,
                     rdb_handlers: &mut Box<dyn RdbHandler>,
-                    cmd_handler: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                    _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     println!("rdb size: {} bytes", length);
+    rdb_handlers.handle(Object::BOR);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
     input.read_exact(&mut bytes)?;
@@ -96,6 +95,13 @@ pub(crate) fn parse(input: &mut Conn,
     input.read_exact(&mut bytes[..=3])?;
     let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
     let rdb_version = rdb_version.parse::<isize>().unwrap();
+    
+    let mut meta = Meta {
+        db: 0,
+        expired_type: None,
+        expired_time: None,
+    };
+    
     loop {
         let data_type = input.read_u8()?;
         match data_type {
@@ -108,7 +114,7 @@ pub(crate) fn parse(input: &mut Conn,
             }
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
-                cmd_handler.handle(Command::SELECT(&SELECT { db: db as i32 }));
+                meta.db = db;
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;
@@ -118,36 +124,40 @@ pub(crate) fn parse(input: &mut Conn,
             }
             RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
                 if data_type == RDB_OPCODE_EXPIRETIME_MS {
-                    input.read_integer(8, false)?;
+                    let expired_time = input.read_integer(8, false)?;
+                    meta.expired_time = Option::Some(expired_time as i64);
+                    meta.expired_type = Option::Some(ExpireType::Millisecond);
                 } else {
-                    input.read_integer(4, false)?;
+                    let expired_time = input.read_integer(4, false)?;
+                    meta.expired_time = Option::Some(expired_time as i64);
+                    meta.expired_type = Option::Some(ExpireType::Second);
                 }
                 let value_type = input.read_u8()?;
                 match value_type {
                     RDB_OPCODE_FREQ => {
                         input.read_u8()?;
                         let value_type = input.read_u8()?;
-                        input.read_object(value_type, rdb_handlers)?;
+                        input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                     RDB_OPCODE_IDLE => {
                         input.read_length()?;
                         let value_type = input.read_u8()?;
-                        input.read_object(value_type, rdb_handlers)?;
+                        input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                     _ => {
-                        input.read_object(value_type, rdb_handlers)?;
+                        input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                 }
             }
             RDB_OPCODE_FREQ => {
                 input.read_u8()?;
                 let value_type = input.read_u8()?;
-                input.read_object(value_type, rdb_handlers)?;
+                input.read_object(value_type, rdb_handlers, &meta)?;
             }
             RDB_OPCODE_IDLE => {
                 input.read_length()?;
                 let value_type = input.read_u8()?;
-                input.read_object(value_type, rdb_handlers)?;
+                input.read_object(value_type, rdb_handlers, &meta)?;
             }
             RDB_OPCODE_MODULE_AUX => {
                 // TODO
@@ -159,10 +169,11 @@ pub(crate) fn parse(input: &mut Conn,
                 break;
             }
             _ => {
-                input.read_object(data_type, rdb_handlers)?;
+                input.read_object(data_type, rdb_handlers, &meta)?;
             }
         };
     };
+    rdb_handlers.handle(Object::EOR);
     Ok(Empty)
 }
 
@@ -282,27 +293,50 @@ pub enum Object<'a> {
     
     /// Hash:
     Hash(Hash<'a>),
+    
+    /// being of rdb
+    BOR,
+    
+    /// end of rdb
+    EOR,
+}
+
+#[derive(Debug)]
+pub struct Meta {
+    pub db: isize,
+    pub expired_type: Option<ExpireType>,
+    pub expired_time: Option<i64>,
+}
+
+#[derive(Debug)]
+pub enum ExpireType {
+    Second,
+    Millisecond,
 }
 
 #[derive(Debug)]
 pub struct KeyValue<'a> {
     pub key: &'a [u8],
     pub value: &'a [u8],
+    pub meta: &'a Meta,
 }
 
 pub struct List<'a> {
     pub key: &'a [u8],
     pub values: &'a [Vec<u8>],
+    pub meta: &'a Meta,
 }
 
 pub struct Set<'a> {
     pub key: &'a [u8],
     pub members: &'a [Vec<u8>],
+    pub meta: &'a Meta,
 }
 
 pub struct SortedSet<'a> {
     pub key: &'a [u8],
     pub items: &'a [Item],
+    pub meta: &'a Meta,
 }
 
 #[derive(Debug)]
@@ -314,6 +348,7 @@ pub struct Item {
 pub struct Hash<'a> {
     pub key: &'a [u8],
     pub fields: &'a [Field],
+    pub meta: &'a Meta,
 }
 
 #[derive(Debug)]
