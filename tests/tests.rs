@@ -482,7 +482,7 @@ fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Bo
     let port: u16 = 16379;
     let pid = start_redis_server(rdb, port);
     // wait redis to start
-    sleep(Duration::from_secs(10));
+    sleep(Duration::from_secs(2));
     
     let ip = IpAddr::from_str("127.0.0.1").unwrap();
     let conf = Config {
@@ -528,4 +528,5 @@ fn shutdown_redis(pid: u32) {
         .output()
         .expect("kill redis failed");
     println!("{:?}", output);
+    sleep(Duration::from_secs(1));
 }
