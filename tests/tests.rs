@@ -267,6 +267,33 @@ fn test_linked_list() {
     start_redis_test("linkedlist.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
 }
 
+#[test]
+#[serial]
+fn test_multiple_database() {
+    struct TestRdbHandler {}
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::String(kv) => {
+                    let key = String::from_utf8_lossy(kv.key);
+                    if "key_in_zeroth_database".eq(&key) {
+                        assert_eq!(0, kv.meta.db);
+                        assert_eq!("zero", String::from_utf8_lossy(kv.value))
+                    } else if "key_in_second_database".eq(&key) {
+                        assert_eq!(2, kv.meta.db);
+                        assert_eq!("second", String::from_utf8_lossy(kv.value))
+                    } else {
+                        panic!("key名错误")
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("multiple_databases.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+}
+
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
     let port: u16 = 16379;
     let pid = start_redis_server(rdb, port);
