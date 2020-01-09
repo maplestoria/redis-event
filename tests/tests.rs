@@ -9,6 +9,7 @@ use redis_event::config::Config;
 use redis_event::listener::standalone;
 use redis_event::rdb::Object;
 use serial_test::serial;
+use std::collections::HashMap;
 
 #[test]
 #[serial]
@@ -32,6 +33,35 @@ fn test_hash_parser() {
     }
     
     start_redis_test("dictionary.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_hash_parser1() {
+    struct TestRdbHandler {}
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Hash(hash) => {
+                    let key = String::from_utf8_lossy(hash.key);
+                    assert_eq!("zipmap_compresses_easily", key);
+                    let mut map = HashMap::new();
+                    for field in hash.fields {
+                        let name = String::from_utf8_lossy(&field.name);
+                        let value = String::from_utf8_lossy(&field.value);
+                        map.insert(name, value);
+                    }
+                    assert_eq!("aa", map.get("a").unwrap());
+                    assert_eq!("aaaa", map.get("aa").unwrap());
+                    assert_eq!("aaaaaaaaaaaaaa", map.get("aaaaa").unwrap());
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    start_redis_test("hash_as_ziplist.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
 }
 
 #[test]
