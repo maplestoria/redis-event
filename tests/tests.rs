@@ -10,7 +10,7 @@ use serial_test::serial;
 use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener};
 use redis_event::config::Config;
 use redis_event::listener::standalone;
-use redis_event::rdb::Object;
+use redis_event::rdb::{Object, ExpireType};
 
 #[test]
 #[serial]
@@ -225,6 +225,8 @@ fn test_keys_with_expiry() {
                     let val = String::from_utf8_lossy(kv.value).to_string();
                     assert_eq!("expires_ms_precision", key);
                     assert_eq!("2022-12-25 10:11:12.573 UTC", val);
+                    assert_eq!(ExpireType::Millisecond, kv.meta.expired_type.unwrap());
+                    assert_eq!(1671963072573, kv.meta.expired_time.unwrap());
                 }
                 _ => {}
             }

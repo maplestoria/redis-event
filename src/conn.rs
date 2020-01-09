@@ -208,12 +208,15 @@ impl Conn {
     }
     
     // 根据传入的数据类型，从流中读取对应类型的数据
-    pub(crate) fn read_object(&mut self, value_type: u8, rdb_handlers: &mut Box<dyn RdbHandler>) -> Result<()> {
+    pub(crate) fn read_object(&mut self,
+                              value_type: u8,
+                              rdb_handlers: &mut Box<dyn RdbHandler>,
+                              meta: &Meta) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
                 let key = self.read_string()?;
                 let value = self.read_string()?;
-                rdb_handlers.handle(Object::String(KeyValue { key: &key, value: &value }));
+                rdb_handlers.handle(Object::String(KeyValue { key: &key, value: &value, meta }));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = self.read_string()?;
@@ -232,9 +235,9 @@ impl Conn {
                         }
                     }
                     if value_type == RDB_TYPE_LIST {
-                        rdb_handlers.handle(Object::List(List { key: &key, values: &val }));
+                        rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
                     } else {
-                        rdb_handlers.handle(Object::Set(Set { key: &key, members: &val }));
+                        rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
                     }
                 }
             }
@@ -254,7 +257,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val }));
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -273,7 +276,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val }));
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
                 }
             }
             RDB_TYPE_HASH => {
@@ -296,7 +299,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val }));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -321,7 +324,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val }));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
@@ -344,7 +347,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::List(List { key: &key, values: &val }));
+                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
                 }
             }
             RDB_TYPE_HASH_ZIPLIST => {
@@ -371,7 +374,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val }));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
                 }
             }
             RDB_TYPE_ZSET_ZIPLIST => {
@@ -400,7 +403,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val }));
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -422,7 +425,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Set(Set { key: &key, members: &val }));
+                    rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
@@ -441,7 +444,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::List(List { key: &key, values: &val }));
+                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
                 }
             }
             RDB_TYPE_MODULE => {

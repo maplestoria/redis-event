@@ -1,7 +1,6 @@
 use core::slice::Iter;
 
 use crate::cmd::strings::Op::{AND, NOT, OR, XOR};
-use crate::rdb::KeyValue;
 
 /// 这个模块处理Strings相关的命令
 /// 所有涉及到的命令参考https://redis.io/commands#string
@@ -308,6 +307,12 @@ pub(crate) fn parse_incrby(mut iter: Iter<Vec<u8>>) -> INCRBY {
     let key = iter.next().unwrap();
     let increment = iter.next().unwrap();
     INCRBY { key, increment }
+}
+
+#[derive(Debug)]
+pub struct KeyValue<'a> {
+    pub key: &'a [u8],
+    pub value: &'a [u8],
 }
 
 #[derive(Debug)]
