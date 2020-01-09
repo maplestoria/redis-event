@@ -1,19 +1,20 @@
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::process::Command;
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
+use serial_test::serial;
+
 use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener};
 use redis_event::config::Config;
 use redis_event::listener::standalone;
 use redis_event::rdb::Object;
-use serial_test::serial;
-use std::collections::HashMap;
 
 #[test]
 #[serial]
-fn test_hash_parser() {
+fn test_hash_parse() {
     struct TestRdbHandler {}
     
     impl RdbHandler for TestRdbHandler {
@@ -37,7 +38,7 @@ fn test_hash_parser() {
 
 #[test]
 #[serial]
-fn test_hash_parser1() {
+fn test_hash_parse_1() {
     struct TestRdbHandler {}
     
     impl RdbHandler for TestRdbHandler {
@@ -66,7 +67,7 @@ fn test_hash_parser1() {
 
 #[test]
 #[serial]
-fn test_string_parser() {
+fn test_string_parse() {
     struct TestRdbHandler {}
     
     impl RdbHandler for TestRdbHandler {
@@ -83,6 +84,67 @@ fn test_string_parser() {
     }
     
     start_redis_test("easily_compressible_string_key.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_integer_parse() {
+    struct TestRdbHandler {
+        map: HashMap<String, String>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::String(kv) => {
+                    self.map.insert(String::from_utf8_lossy(kv.key).to_string(),
+                                    String::from_utf8_lossy(kv.value).to_string());
+                }
+                Object::EOR => {
+                    assert_eq!(self.map.get("125").unwrap(), "Positive 8 bit integer");
+                    assert_eq!(self.map.get("43947").unwrap(), "Positive 16 bit integer");
+                    assert_eq!(self.map.get("183358245").unwrap(), "Positive 32 bit integer");
+                    assert_eq!(self.map.get("-123").unwrap(), "Negative 8 bit integer");
+                    assert_eq!(self.map.get("-29477").unwrap(), "Negative 16 bit integer");
+                    assert_eq!(self.map.get("-183358245").unwrap(), "Negative 32 bit integer");
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    start_redis_test("integer_keys.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_intset_parse() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<String>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Set(set) => {
+                    let key = String::from_utf8_lossy(set.key).to_string();
+                    let mut val = Vec::new();
+                    for mem in set.members {
+                        val.push(String::from_utf8_lossy(mem).to_string());
+                    }
+                }
+                Object::EOR => {
+                    let values = self.map.get("intset_16").unwrap();
+                    let arr = ["32766", "32765", "32764"];
+                    for val in values {
+                        assert!(arr.contains(&val.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("intset_16.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
 }
 
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {

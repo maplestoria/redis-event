@@ -89,6 +89,7 @@ pub(crate) fn parse(input: &mut Conn,
                     rdb_handlers: &mut Box<dyn RdbHandler>,
                     cmd_handler: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     println!("rdb size: {} bytes", length);
+    rdb_handlers.handle(Object::BOR);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
     input.read_exact(&mut bytes)?;
@@ -163,6 +164,7 @@ pub(crate) fn parse(input: &mut Conn,
             }
         };
     };
+    rdb_handlers.handle(Object::EOR);
     Ok(Empty)
 }
 
@@ -282,6 +284,12 @@ pub enum Object<'a> {
     
     /// Hash:
     Hash(Hash<'a>),
+    
+    /// being of rdb
+    BOR,
+    
+    /// end of rdb
+    EOR,
 }
 
 #[derive(Debug)]
