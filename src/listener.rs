@@ -7,7 +7,7 @@ pub mod standalone {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
-    use crate::{cmd, CommandHandler, rdb, RdbHandler, RedisListener, to_string};
+    use crate::{cmd, CommandHandler, rdb, RdbHandler, RedisListener, to_string, NoOpRdbHandler, NoOpCommandHandler};
     use crate::config::Config;
     use crate::conn::Conn;
     use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
@@ -17,8 +17,8 @@ pub mod standalone {
     pub struct Listener {
         config: Config,
         conn: Option<Conn>,
-        rdb_listeners: Vec<Box<dyn RdbHandler>>,
-        cmd_listeners: Vec<Box<dyn CommandHandler>>,
+        rdb_listener: Box<dyn RdbHandler>,
+        cmd_listener: Box<dyn CommandHandler>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
     }
@@ -89,7 +89,7 @@ pub mod standalone {
         
         fn response(&mut self,
                     func: fn(&mut Conn, isize,
-                             &Vec<Box<dyn RdbHandler>>, &Vec<Box<dyn CommandHandler>>,
+                             &mut Box<dyn RdbHandler>, &mut Box<dyn CommandHandler>,
                     ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
         ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             loop {
@@ -136,7 +136,7 @@ pub mod standalone {
                             let length = to_string(bytes);
                             let length = length.parse::<isize>().unwrap();
                             let stream = self.conn.as_mut().unwrap();
-                            return func(stream, length, &self.rdb_listeners, &self.cmd_listeners);
+                            return func(stream, length, &mut self.rdb_listener, &mut self.cmd_listener);
                         } else {
                             panic!("Expect LF after CR");
                         }
@@ -186,12 +186,12 @@ pub mod standalone {
             }
         }
         
-        pub fn add_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
-            self.rdb_listeners.push(listener)
+        pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
+            self.rdb_listener = listener
         }
         
-        pub fn add_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
-            self.cmd_listeners.push(listener)
+        pub fn set_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
+            self.cmd_listener = listener
         }
         
         fn start_sync(&mut self) -> Result<bool> {
@@ -302,7 +302,7 @@ pub mod standalone {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
                     Ok(Data::BytesVec(data)) => {
-                        cmd::parse(data, &self.cmd_listeners);
+                        cmd::parse(data, &mut self.cmd_listener);
                     }
                     Err(err) => return Err(err),
                     Ok(Empty) => {}
@@ -328,8 +328,8 @@ pub mod standalone {
         Listener {
             config: conf,
             conn: Option::None,
-            rdb_listeners: Vec::new(),
-            cmd_listeners: Vec::new(),
+            rdb_listener: Box::new(NoOpRdbHandler{}),
+            cmd_listener: Box::new(NoOpCommandHandler{}),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
         }

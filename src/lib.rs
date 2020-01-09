@@ -24,12 +24,24 @@ pub trait RedisListener {
 
 /// 定义redis rdb事件的处理接口
 pub trait RdbHandler {
-    fn handle(&self, data: Object);
+    fn handle(&mut self, data: Object);
+}
+
+struct NoOpRdbHandler {}
+
+impl RdbHandler for NoOpRdbHandler {
+    fn handle(&mut self, _: Object) {}
 }
 
 /// 定义redis命令的处理接口
 pub trait CommandHandler {
-    fn handle(&self, cmd: Command);
+    fn handle(&mut self, cmd: Command);
+}
+
+struct NoOpCommandHandler {}
+
+impl CommandHandler for NoOpCommandHandler {
+    fn handle(&mut self, _: Command) {}
 }
 
 /// 转换为utf-8字符串，不验证正确性

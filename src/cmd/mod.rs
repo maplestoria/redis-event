@@ -103,463 +103,312 @@ pub enum Command<'a> {
     ZUNIONSTORE(&'a ZUNIONSTORE<'a>),
 }
 
-pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &Vec<Box<dyn CommandHandler>>) {
+pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut Box<dyn CommandHandler>) {
     let mut iter = data.iter();
     if let Some(cmd_name) = iter.next() {
         let cmd_name = String::from_utf8_lossy(cmd_name).to_uppercase();
         match cmd_name.as_str() {
             "APPEND" => {
                 let cmd = strings::parse_append(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::APPEND(&cmd))
-                );
+                cmd_handler.handle(Command::APPEND(&cmd));
             }
             "BITFIELD" => {
                 let cmd = strings::parse_bitfield(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::BITFIELD(&cmd))
-                );
+                cmd_handler.handle(Command::BITFIELD(&cmd));
             }
             "BITOP" => {
                 let cmd = strings::parse_bitop(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::BITOP(&cmd))
-                );
+                cmd_handler.handle(Command::BITOP(&cmd));
             }
             "BRPOPLPUSH" => {
                 let cmd = lists::parse_brpoplpush(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::BRPOPLPUSH(&cmd))
-                );
+                cmd_handler.handle(Command::BRPOPLPUSH(&cmd));
             }
             "DEL" => {
                 let cmd = keys::parse_del(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::DEL(&cmd))
-                );
+                cmd_handler.handle(Command::DEL(&cmd));
             }
             "DECR" => {
                 let cmd = strings::parse_decr(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::DECR(&cmd))
-                );
+                cmd_handler.handle(Command::DECR(&cmd));
             }
             "DECRBY" => {
                 let cmd = strings::parse_decrby(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::DECRBY(&cmd))
-                );
+                cmd_handler.handle(Command::DECRBY(&cmd));
             }
             "EVAL" => {
                 let cmd = scripting::parse_eval(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::EVAL(&cmd))
-                );
+                cmd_handler.handle(Command::EVAL(&cmd));
             }
             "EVALSHA" => {
                 let cmd = scripting::parse_evalsha(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::EVALSHA(&cmd))
-                );
+                cmd_handler.handle(Command::EVALSHA(&cmd));
             }
             "EXPIRE" => {
                 let cmd = keys::parse_expire(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::EXPIRE(&cmd))
-                );
+                cmd_handler.handle(Command::EXPIRE(&cmd));
             }
             "EXPIREAT" => {
                 let cmd = keys::parse_expireat(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::EXPIREAT(&cmd))
-                );
+                cmd_handler.handle(Command::EXPIREAT(&cmd));
             }
             "EXEC" => {
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::EXEC)
-                );
+                cmd_handler.handle(Command::EXEC);
             }
             "FLUSHALL" => {
                 let cmd = server::parse_flushall(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::FLUSHALL(&cmd))
-                );
+                cmd_handler.handle(Command::FLUSHALL(&cmd));
             }
             "FLUSHDB" => {
                 let cmd = server::parse_flushdb(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::FLUSHDB(&cmd))
-                );
+                cmd_handler.handle(Command::FLUSHDB(&cmd));
             }
             "GETSET" => {
                 let cmd = strings::parse_getset(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::GETSET(&cmd))
-                );
+                cmd_handler.handle(Command::GETSET(&cmd));
             }
             "HDEL" => {
                 let cmd = hashes::parse_hdel(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::HDEL(&cmd))
-                );
+                cmd_handler.handle(Command::HDEL(&cmd));
             }
             "HINCRBY" => {
                 let cmd = hashes::parse_hincrby(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::HINCRBY(&cmd))
-                );
+                cmd_handler.handle(Command::HINCRBY(&cmd));
             }
             "HMSET" => {
                 let cmd = hashes::parse_hmset(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::HMSET(&cmd))
-                );
+                cmd_handler.handle(Command::HMSET(&cmd));
             }
             "HSET" => {
                 let cmd = hashes::parse_hset(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::HSET(&cmd))
-                );
+                cmd_handler.handle(Command::HSET(&cmd));
             }
             "HSETNX" => {
                 let cmd = hashes::parse_hsetnx(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::HSETNX(&cmd))
-                );
+                cmd_handler.handle(Command::HSETNX(&cmd));
             }
             "INCR" => {
                 let cmd = strings::parse_incr(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::INCR(&cmd))
-                );
+                cmd_handler.handle(Command::INCR(&cmd));
             }
             "INCRBY" => {
                 let cmd = strings::parse_incrby(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::INCRBY(&cmd))
-                );
+                cmd_handler.handle(Command::INCRBY(&cmd));
             }
             "LINSERT" => {
                 let cmd = lists::parse_linsert(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LINSERT(&cmd))
-                );
+                cmd_handler.handle(Command::LINSERT(&cmd));
             }
             "LPOP" => {
                 let cmd = lists::parse_lpop(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LPOP(&cmd))
-                );
+                cmd_handler.handle(Command::LPOP(&cmd));
             }
             "LPUSH" => {
                 let cmd = lists::parse_lpush(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LPUSH(&cmd))
-                );
+                cmd_handler.handle(Command::LPUSH(&cmd));
             }
             "LPUSHX" => {
                 let cmd = lists::parse_lpushx(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LPUSHX(&cmd))
-                );
+                cmd_handler.handle(Command::LPUSHX(&cmd));
             }
             "LREM" => {
                 let cmd = lists::parse_lrem(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LREM(&cmd))
-                );
+                cmd_handler.handle(Command::LREM(&cmd));
             }
             "LSET" => {
                 let cmd = lists::parse_lset(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LSET(&cmd))
-                );
+                cmd_handler.handle(Command::LSET(&cmd));
             }
             "LTRIM" => {
                 let cmd = lists::parse_ltrim(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::LTRIM(&cmd))
-                );
+                cmd_handler.handle(Command::LTRIM(&cmd));
             }
             "RENAME" => {
                 let cmd = keys::parse_rename(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RENAME(&cmd))
-                );
+                cmd_handler.handle(Command::RENAME(&cmd));
             }
             "RENAMENX" => {
                 let cmd = keys::parse_renamenx(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RENAMENX(&cmd))
-                );
+                cmd_handler.handle(Command::RENAMENX(&cmd));
             }
             "RESTORE" => {
                 let cmd = keys::parse_restore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RESTORE(&cmd))
-                );
+                cmd_handler.handle(Command::RESTORE(&cmd));
             }
             "RPOP" => {
                 let cmd = lists::parse_rpop(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RPOP(&cmd))
-                );
+                cmd_handler.handle(Command::RPOP(&cmd));
             }
             "RPOPLPUSH" => {
                 let cmd = lists::parse_rpoplpush(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RPOPLPUSH(&cmd))
-                );
+                cmd_handler.handle(Command::RPOPLPUSH(&cmd));
             }
             "RPUSH" => {
                 let cmd = lists::parse_rpush(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RPUSH(&cmd))
-                );
+                cmd_handler.handle(Command::RPUSH(&cmd));
             }
             "RPUSHX" => {
                 let cmd = lists::parse_rpushx(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::RPUSHX(&cmd))
-                );
+                cmd_handler.handle(Command::RPUSHX(&cmd));
             }
             "SADD" => {
                 let cmd = sets::parse_sadd(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SADD(&cmd))
-                );
+                cmd_handler.handle(Command::SADD(&cmd));
             }
             "SCRIPT" => {
                 let cmd = iter.next().unwrap();
                 let cmd = String::from_utf8_lossy(cmd).to_uppercase();
                 if &cmd == "LOAD" {
                     let cmd = scripting::parse_script_load(iter);
-                    cmd_handler.iter().for_each(|handler|
-                        handler.handle(Command::SCRIPTLOAD(&cmd))
-                    );
+                    cmd_handler.handle(Command::SCRIPTLOAD(&cmd));
                 } else if &cmd == "FLUSH" {
-                    cmd_handler.iter().for_each(|handler|
-                        handler.handle(Command::SCRIPTFLUSH)
-                    );
+                    cmd_handler.handle(Command::SCRIPTFLUSH);
                 }
             }
             "SDIFFSTORE" => {
                 let cmd = sets::parse_sdiffstore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SDIFFSTORE(&cmd))
-                );
+                cmd_handler.handle(Command::SDIFFSTORE(&cmd));
             }
             "SMOVE" => {
                 let cmd = sets::parse_smove(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SMOVE(&cmd))
-                );
+                cmd_handler.handle(Command::SMOVE(&cmd));
             }
             "SET" => {
                 let cmd = strings::parse_set(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SET(&cmd))
-                );
+                cmd_handler.handle(Command::SET(&cmd));
             }
             "SELECT" => {
                 let cmd = connection::parse_select(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SELECT(&cmd))
-                );
+                cmd_handler.handle(Command::SELECT(&cmd));
             }
             "SORT" => {
                 let cmd = keys::parse_sort(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SORT(&cmd))
-                );
+                cmd_handler.handle(Command::SORT(&cmd));
             }
             "SREM" => {
                 let cmd = sets::parse_srem(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SREM(&cmd))
-                );
+                cmd_handler.handle(Command::SREM(&cmd));
             }
             "SUNIONSTORE" => {
                 let cmd = sets::parse_sunionstore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SUNIONSTORE(&cmd))
-                );
+                cmd_handler.handle(Command::SUNIONSTORE(&cmd));
             }
             "SWAPDB" => {
                 let cmd = connection::parse_swapdb(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SWAPDB(&cmd))
-                );
+                cmd_handler.handle(Command::SWAPDB(&cmd));
             }
             "UNLINK" => {
                 let cmd = keys::parse_unlink(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::UNLINK(&cmd))
-                );
+                cmd_handler.handle(Command::UNLINK(&cmd));
             }
             "MOVE" => {
                 let cmd = keys::parse_move(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::MOVE(&cmd))
-                );
+                cmd_handler.handle(Command::MOVE(&cmd));
             }
             "MSET" => {
                 let cmd = strings::parse_mset(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::MSET(&cmd))
-                );
+                cmd_handler.handle(Command::MSET(&cmd));
             }
             "MSETNX" => {
                 let cmd = strings::parse_msetnx(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::MSETNX(&cmd))
-                );
+                cmd_handler.handle(Command::MSETNX(&cmd));
             }
             "MULTI" => {
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::MULTI)
-                );
+                cmd_handler.handle(Command::MULTI);
             }
             "PFADD" => {
                 let cmd = hyperloglog::parse_pfadd(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PFADD(&cmd))
-                );
+                cmd_handler.handle(Command::PFADD(&cmd));
             }
             "PFCOUNT" => {
                 let cmd = hyperloglog::parse_pfcount(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PFCOUNT(&cmd))
-                );
+                cmd_handler.handle(Command::PFCOUNT(&cmd));
             }
             "PFMERGE" => {
                 let cmd = hyperloglog::parse_pfmerge(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PFMERGE(&cmd))
-                );
+                cmd_handler.handle(Command::PFMERGE(&cmd));
             }
             "SETEX" => {
                 let cmd = strings::parse_setex(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SETEX(&cmd))
-                );
+                cmd_handler.handle(Command::SETEX(&cmd));
             }
             "SETNX" => {
                 let cmd = strings::parse_setnx(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SETNX(&cmd))
-                );
+                cmd_handler.handle(Command::SETNX(&cmd));
             }
             "PSETEX" => {
                 let cmd = strings::parse_psetex(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PSETEX(&cmd))
-                );
+                cmd_handler.handle(Command::PSETEX(&cmd));
             }
             "PUBLISH" => {
                 let cmd = pub_sub::parse_publish(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PUBLISH(&cmd))
-                );
+                cmd_handler.handle(Command::PUBLISH(&cmd));
             }
             "PEXPIRE" => {
                 let cmd = keys::parse_pexpire(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PEXPIRE(&cmd))
-                );
+                cmd_handler.handle(Command::PEXPIRE(&cmd));
             }
             "PEXPIREAT" => {
                 let cmd = keys::parse_pexpireat(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PEXPIREAT(&cmd))
-                );
+                cmd_handler.handle(Command::PEXPIREAT(&cmd));
             }
             "PERSIST" => {
                 let cmd = keys::parse_persist(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::PERSIST(&cmd))
-                );
+                cmd_handler.handle(Command::PERSIST(&cmd));
             }
             "SETRANGE" => {
                 let cmd = strings::parse_setrange(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SETRANGE(&cmd))
-                );
+                cmd_handler.handle(Command::SETRANGE(&cmd));
             }
             "SETBIT" => {
                 let cmd = strings::parse_setbit(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SETBIT(&cmd))
-                );
+                cmd_handler.handle(Command::SETBIT(&cmd));
             }
             "SINTERSTORE" => {
                 let cmd = sets::parse_sinterstore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::SINTERSTORE(&cmd))
-                );
+                cmd_handler.handle(Command::SINTERSTORE(&cmd));
             }
             "ZADD" => {
                 let cmd = sorted_sets::parse_zadd(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZADD(&cmd))
-                );
+                cmd_handler.handle(Command::ZADD(&cmd));
             }
             "ZINCRBY" => {
                 let cmd = sorted_sets::parse_zincrby(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZINCRBY(&cmd))
-                );
+                cmd_handler.handle(Command::ZINCRBY(&cmd));
             }
             "ZINTERSTORE" => {
                 let cmd = sorted_sets::parse_zinterstore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZINTERSTORE(&cmd))
-                );
+                cmd_handler.handle(Command::ZINTERSTORE(&cmd));
             }
             "ZPOPMAX" => {
                 let cmd = sorted_sets::parse_zpopmax(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZPOPMAX(&cmd))
-                );
+                cmd_handler.handle(Command::ZPOPMAX(&cmd));
             }
             "ZPOPMIN" => {
                 let cmd = sorted_sets::parse_zpopmin(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZPOPMIN(&cmd))
-                );
+                cmd_handler.handle(Command::ZPOPMIN(&cmd));
             }
             "ZREM" => {
                 let cmd = sorted_sets::parse_zrem(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZREM(&cmd))
-                );
+                cmd_handler.handle(Command::ZREM(&cmd));
             }
             "ZREMRANGEBYLEX" => {
                 let cmd = sorted_sets::parse_zremrangebylex(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZREMRANGEBYLEX(&cmd))
-                );
+                cmd_handler.handle(Command::ZREMRANGEBYLEX(&cmd));
             }
             "ZREMRANGEBYRANK" => {
                 let cmd = sorted_sets::parse_zremrangebyrank(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZREMRANGEBYRANK(&cmd))
-                );
+                cmd_handler.handle(Command::ZREMRANGEBYRANK(&cmd));
             }
             "ZREMRANGEBYSCORE" => {
                 let cmd = sorted_sets::parse_zremrangebyscore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZREMRANGEBYSCORE(&cmd))
-                );
+                cmd_handler.handle(Command::ZREMRANGEBYSCORE(&cmd));
             }
             "ZUNIONSTORE" => {
                 let cmd = sorted_sets::parse_zunionstore(iter);
-                cmd_handler.iter().for_each(|handler|
-                    handler.handle(Command::ZUNIONSTORE(&cmd))
-                );
+                cmd_handler.handle(Command::ZUNIONSTORE(&cmd));
             }
-            "PING" => cmd_handler.iter().for_each(|handler|
-                handler.handle(Command::PING)),
+            "PING" => cmd_handler.handle(Command::PING),
             _ => {
                 eprintln!("unknown command: {}", cmd_name);
             }
