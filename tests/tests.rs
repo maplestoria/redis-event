@@ -355,6 +355,70 @@ fn test_regular_sorted_set() {
     start_redis_test("regular_sorted_set.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
 }
 
+#[test]
+#[serial]
+fn test_zipmap_big_values() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<u8>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Hash(hash) => {
+                    assert_eq!("zipmap_with_big_values", String::from_utf8_lossy(hash.key));
+                    for field in hash.fields {
+                        let name = String::from_utf8_lossy(&field.name).to_string();
+                        self.map.insert(name, field.value.to_vec());
+                    }
+                }
+                Object::EOR => {
+                    assert_eq!(253, self.map.get("253bytes").unwrap().len());
+                    assert_eq!(254, self.map.get("254bytes").unwrap().len());
+                    assert_eq!(255, self.map.get("255bytes").unwrap().len());
+                    assert_eq!(300, self.map.get("253bytes").unwrap().len());
+                    assert_eq!(20000, self.map.get("20kbytes").unwrap().len());
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("zipmap_with_big_values.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_ziplist() {
+    struct TestRdbHandler {
+        list: Vec<String>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::List(list) => {
+                    assert_eq!("ziplist_compresses_easily", String::from_utf8_lossy(list.key));
+                    for val in list.values {
+                        let value = String::from_utf8_lossy(val).to_string();
+                        self.list.push(value);
+                    }
+                }
+                Object::EOR => {
+                    assert_eq!(6, self.list.len());
+                    assert_eq!("aaaaaa", self.list.get(0).unwrap());
+                    assert_eq!("aaaaaaaaaaaa", self.list.get(1).unwrap());
+                    assert_eq!("aaaaaaaaaaaaaaaaaa", self.list.get(2).unwrap());
+                    assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(3).unwrap());
+                    assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(4).unwrap());
+                    assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(5).unwrap());
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("ziplist_that_compresses_easily.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
+}
+
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
     let port: u16 = 16379;
     let pid = start_redis_server(rdb, port);
