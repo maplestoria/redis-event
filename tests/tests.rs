@@ -294,6 +294,67 @@ fn test_multiple_database() {
     start_redis_test("multiple_databases.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
 }
 
+#[test]
+#[serial]
+fn test_regular_set() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<String>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Set(set) => {
+                    let key = String::from_utf8_lossy(set.key).to_string();
+                    let mut val = Vec::new();
+                    for mem in set.members {
+                        val.push(String::from_utf8_lossy(mem).to_string());
+                    }
+                    self.map.insert(key, val);
+                }
+                Object::EOR => {
+                    let values = self.map.get("regular_set").unwrap();
+                    let arr = ["alpha", "beta", "gamma", "delta", "phi", "kappa"];
+                    for val in values {
+                        assert!(arr.contains(&val.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("regular_set.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_regular_sorted_set() {
+    struct TestRdbHandler {
+        map: HashMap<String, f64>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::SortedSet(set) => {
+                    let key = String::from_utf8_lossy(set.key).to_string();
+                    assert_eq!("force_sorted_set", key);
+                    for item in set.items {
+                        self.map.insert(String::from_utf8_lossy(&item.member).to_string(), item.score);
+                    }
+                }
+                Object::EOR => {
+                    assert_eq!(500, self.map.len());
+                    assert_eq!(3.19, self.map.get("G72TWVWH0DY782VG0H8VVAR8RNO7BS9QGOHTZFJU67X7L0Z3PR").unwrap().clone());
+                    assert_eq!(0.76, self.map.get("N8HKPIK4RC4I2CXVV90LQCWODW1DZYD0DA26R8V5QP7UR511M8").unwrap().clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("regular_sorted_set.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
     let port: u16 = 16379;
     let pid = start_redis_server(rdb, port);
