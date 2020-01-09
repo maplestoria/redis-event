@@ -388,6 +388,63 @@ fn test_zipmap_big_values() {
 
 #[test]
 #[serial]
+fn test_zipmap_compress() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<u8>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Hash(hash) => {
+                    assert_eq!("zipmap_compresses_easily", String::from_utf8_lossy(hash.key));
+                    for field in hash.fields {
+                        let name = String::from_utf8_lossy(&field.name).to_string();
+                        self.map.insert(name, field.value.to_vec());
+                    }
+                }
+                Object::EOR => {
+                    assert_eq!("aa", self.map.get("a").unwrap());
+                    assert_eq!("aaaa", self.map.get("aa").unwrap());
+                    assert_eq!("aaaaaaaaaaaaaa", self.map.get("aaaaa").unwrap());
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("zipmap_that_compresses_easily.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_zipmap_not_compress() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<u8>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Hash(hash) => {
+                    assert_eq!("zimap_doesnt_compress", String::from_utf8_lossy(hash.key));
+                    for field in hash.fields {
+                        let name = String::from_utf8_lossy(&field.name).to_string();
+                        self.map.insert(name, field.value.to_vec());
+                    }
+                }
+                Object::EOR => {
+                    assert_eq!("2", self.map.get("MKD1G6").unwrap());
+                    assert_eq!("F7TI", self.map.get("YNNXK").unwrap());
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("zipmap_that_doesnt_compress.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
 fn test_ziplist() {
     struct TestRdbHandler {
         list: Vec<String>
@@ -423,7 +480,7 @@ fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Bo
     let port: u16 = 16379;
     let pid = start_redis_server(rdb, port);
     // wait redis to start
-    sleep(Duration::from_secs(2));
+    sleep(Duration::from_secs(10));
     
     let ip = IpAddr::from_str("127.0.0.1").unwrap();
     let conf = Config {
@@ -454,6 +511,8 @@ fn start_redis_server(rdb: &str, port: u16) -> u32 {
         .arg(rdb)
         .arg("--dir")
         .arg("./tests/rdb")
+        .arg("--logfile")
+        .arg("./redis.log")
         .spawn()
         .expect("failed to start redis-server");
     return child.id();
