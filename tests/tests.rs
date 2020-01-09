@@ -14,7 +14,7 @@ use redis_event::rdb::Object;
 
 #[test]
 #[serial]
-fn test_hash_parse() {
+fn test_hash() {
     struct TestRdbHandler {}
     
     impl RdbHandler for TestRdbHandler {
@@ -38,7 +38,7 @@ fn test_hash_parse() {
 
 #[test]
 #[serial]
-fn test_hash_parse_1() {
+fn test_hash_1() {
     struct TestRdbHandler {}
     
     impl RdbHandler for TestRdbHandler {
@@ -67,7 +67,7 @@ fn test_hash_parse_1() {
 
 #[test]
 #[serial]
-fn test_string_parse() {
+fn test_string() {
     struct TestRdbHandler {}
     
     impl RdbHandler for TestRdbHandler {
@@ -88,7 +88,7 @@ fn test_string_parse() {
 
 #[test]
 #[serial]
-fn test_integer_parse() {
+fn test_integer() {
     struct TestRdbHandler {
         map: HashMap<String, String>
     }
@@ -118,7 +118,7 @@ fn test_integer_parse() {
 
 #[test]
 #[serial]
-fn test_intset_parse() {
+fn test_intset16() {
     struct TestRdbHandler {
         map: HashMap<String, Vec<String>>
     }
@@ -146,6 +146,91 @@ fn test_intset_parse() {
         }
     }
     start_redis_test("intset_16.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_intset32() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<String>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Set(set) => {
+                    let key = String::from_utf8_lossy(set.key).to_string();
+                    let mut val = Vec::new();
+                    for mem in set.members {
+                        val.push(String::from_utf8_lossy(mem).to_string());
+                    }
+                    self.map.insert(key, val);
+                }
+                Object::EOR => {
+                    let values = self.map.get("intset_32").unwrap();
+                    let arr = ["2147418110", "2147418109", "2147418108"];
+                    for val in values {
+                        assert!(arr.contains(&val.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("intset_32.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_intset64() {
+    struct TestRdbHandler {
+        map: HashMap<String, Vec<String>>
+    }
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::Set(set) => {
+                    let key = String::from_utf8_lossy(set.key).to_string();
+                    let mut val = Vec::new();
+                    for mem in set.members {
+                        val.push(String::from_utf8_lossy(mem).to_string());
+                    }
+                    self.map.insert(key, val);
+                }
+                Object::EOR => {
+                    let values = self.map.get("intset_64").unwrap();
+                    let arr = ["9223090557583032318", "9223090557583032317", "9223090557583032316"];
+                    for val in values {
+                        assert!(arr.contains(&val.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("intset_64.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_keys_with_expiry() {
+    struct TestRdbHandler {}
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::String(kv) => {
+                    let key = String::from_utf8_lossy(kv.key).to_string();
+                    let val = String::from_utf8_lossy(kv.value).to_string();
+                    assert_eq!("expires_ms_precision", key);
+                    assert_eq!("2022-12-25 10:11:12.573 UTC", val);
+                }
+                _ => {}
+            }
+        }
+    }
+    start_redis_test("keys_with_expiry.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
 }
 
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
