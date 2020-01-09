@@ -27,7 +27,7 @@ pub trait RdbHandler {
     fn handle(&mut self, data: Object);
 }
 
-struct NoOpRdbHandler {}
+pub struct NoOpRdbHandler {}
 
 impl RdbHandler for NoOpRdbHandler {
     fn handle(&mut self, _: Object) {}
@@ -38,7 +38,7 @@ pub trait CommandHandler {
     fn handle(&mut self, cmd: Command);
 }
 
-struct NoOpCommandHandler {}
+pub struct NoOpCommandHandler {}
 
 impl CommandHandler for NoOpCommandHandler {
     fn handle(&mut self, _: Command) {}

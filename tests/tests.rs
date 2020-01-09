@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
-use redis_event::{RdbHandler, RedisListener};
+use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener};
 use redis_event::config::Config;
 use redis_event::listener::standalone;
 use redis_event::rdb::Object;
@@ -29,8 +29,32 @@ fn test_hash_parser() {
         }
     }
     
+    start_redis_test("dictionary.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+fn test_string_parser() {
+    struct TestRdbHandler {}
+    
+    impl RdbHandler for TestRdbHandler {
+        fn handle(&mut self, data: Object) {
+            match data {
+                Object::String(kv) => {
+                    let key = String::from_utf8_lossy(kv.key);
+                    assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", key);
+                    assert_eq!("Key that redis should compress easily", String::from_utf8_lossy(kv.value))
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    start_redis_test("easily_compressible_string_key.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+}
+
+fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
     let port: u16 = 16379;
-    let pid = start_redis_server("dictionary.rdb", port);
+    let pid = start_redis_server(rdb, port);
     // wait redis to start
     sleep(Duration::from_secs(2));
     
@@ -43,9 +67,9 @@ fn test_hash_parser() {
         repl_id: String::from("?"),
         repl_offset: -1,
     };
-    let rdb_handler = TestRdbHandler {};
     let mut redis_listener = standalone::new(conf);
-    redis_listener.set_rdb_listener(Box::new(rdb_handler));
+    redis_listener.set_rdb_listener(rdb_handler);
+    redis_listener.set_command_listener(cmd_handler);
     if let Err(error) = redis_listener.open() {
         panic!(error)
     }
