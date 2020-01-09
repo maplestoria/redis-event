@@ -8,8 +8,10 @@ use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener}
 use redis_event::config::Config;
 use redis_event::listener::standalone;
 use redis_event::rdb::Object;
+use serial_test::serial;
 
 #[test]
+#[serial]
 fn test_hash_parser() {
     struct TestRdbHandler {}
     
@@ -33,6 +35,7 @@ fn test_hash_parser() {
 }
 
 #[test]
+#[serial]
 fn test_string_parser() {
     struct TestRdbHandler {}
     
