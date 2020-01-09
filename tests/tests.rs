@@ -132,6 +132,7 @@ fn test_intset_parse() {
                     for mem in set.members {
                         val.push(String::from_utf8_lossy(mem).to_string());
                     }
+                    self.map.insert(key, val);
                 }
                 Object::EOR => {
                     let values = self.map.get("intset_16").unwrap();
