@@ -12,6 +12,7 @@ pub mod standalone {
     use crate::io::{Conn, send};
     use crate::rdb::Data;
     use crate::rdb::Data::{Bytes, Empty};
+    use std::borrow::Borrow;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener {
@@ -68,19 +69,23 @@ pub mod standalone {
             if !self.config.password.is_empty() {
                 let conn = self.conn.as_mut().unwrap();
                 conn.send(b"AUTH", &[self.config.password.as_bytes()])?;
-                conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
             }
             Ok(())
         }
         
-        //        fn send_port(&mut self) -> Result<()> {
-//            let conn = self.conn.as_mut().unwrap();
-//            let port = conn.input.local_addr()?.port().to_string();
-//            let port = port.as_bytes();
-//            conn.send(b"REPLCONF", &[b"listening-port", port])?;
-//            conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
-//            Ok(())
-//        }
+        fn send_port(&mut self) -> Result<()> {
+            let conn = self.conn.as_mut().unwrap();
+            let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
+                Some(stream) => stream,
+                None => panic!("not tcp stream")
+            };
+            let port = stream.local_addr()?.port().to_string();
+            let port = port.as_bytes();
+            conn.send(b"REPLCONF", &[b"listening-port", port])?;
+            conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+            Ok(())
+        }
         
         pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
             self.rdb_listener = listener
@@ -98,11 +103,11 @@ pub mod standalone {
             let conn = self.conn.as_mut().unwrap();
             conn.send(b"PSYNC", &[repl_id, repl_offset])?;
             
-            if let Bytes(resp) = conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())? {
+            if let Bytes(resp) = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
                     if self.config.is_discard_rdb {
-                        conn.reply(rdb::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                        conn.reply(io::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     } else {
                         conn.reply(rdb::parse, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     }
@@ -137,7 +142,7 @@ pub mod standalone {
                     // 不支持PSYNC命令，改用SYNC命令
                     conn.send(b"SYNC", &Vec::new())?;
                     if self.config.is_discard_rdb {
-                        conn.reply(rdb::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                        conn.reply(io::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     } else {
                         conn.reply(rdb::parse, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     }
@@ -151,7 +156,7 @@ pub mod standalone {
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             let conn = self.conn.as_mut().unwrap();
             conn.mark();
-            let cmd = conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
+            let cmd = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
             let read_len = conn.unmark()?;
             self.config.repl_offset += read_len;
             self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
@@ -163,7 +168,7 @@ pub mod standalone {
         fn open(&mut self) -> Result<()> {
             self.connect()?;
             self.auth()?;
-//            self.send_port()?;
+            self.send_port()?;
             while !self.start_sync()? {
                 sleep(Duration::from_secs(5));
             }

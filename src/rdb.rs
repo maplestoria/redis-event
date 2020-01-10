@@ -3,7 +3,7 @@ use std::io::{Cursor, Read, Result};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::{CommandHandler, RdbHandler, to_string};
-use crate::rdb::Data::{Bytes, Empty};
+use crate::rdb::Data::Empty;
 use crate::io::Conn;
 
 // 读取、解析rdb
@@ -99,39 +99,6 @@ pub(crate) fn parse(input: &mut Conn,
     };
     rdb_handlers.handle(Object::EOR);
     Ok(Empty)
-}
-
-// 跳过rdb的字节
-pub(crate) fn skip(input: &mut Conn,
-                   length: isize,
-                   _: &mut dyn RdbHandler,
-                   _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    std::io::copy(&mut input.input.as_mut().take(length as u64), &mut std::io::sink())?;
-    Ok(Data::Empty)
-}
-
-// 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut Conn, length: isize,
-                         _: &mut dyn RdbHandler,
-                         _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    if length > 0 {
-        let mut bytes = vec![0; length as usize];
-        input.read_exact(&mut bytes)?;
-        let end = &mut [0; 2];
-        input.read_exact(end)?;
-        if end == b"\r\n" {
-            return Ok(Bytes(bytes));
-        } else {
-            panic!("Expect CRLF after bulk string, but got: {:?}", end);
-        }
-    } else if length == 0 {
-        // length == 0 代表空字符，后面还有CRLF
-        input.read_exact(&mut [0; 2])?;
-        return Ok(Empty);
-    } else {
-        // length < 0 代表null
-        return Ok(Empty);
-    }
 }
 
 pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize> {

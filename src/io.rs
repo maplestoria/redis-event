@@ -2,20 +2,27 @@
  处理redis的响应数据
 */
 
+use std::any::Any;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, lzf, rdb, RdbHandler, to_string};
+use crate::{CommandHandler, io, lzf, RdbHandler, to_string};
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::*;
 use crate::rdb::Data::{Bytes, BytesVec, Empty};
 
-pub(crate) trait ReadWrite: Read + Write {}
+pub(crate) trait ReadWrite: Read + Write {
+    fn as_any(&self) -> &dyn Any;
+}
 
-impl ReadWrite for TcpStream {}
+impl ReadWrite for TcpStream {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 pub(crate) struct Conn {
     pub(crate) input: Box<dyn ReadWrite>,
@@ -101,7 +108,7 @@ impl Conn {
                         } else {
                             let mut result = Vec::with_capacity(length as usize);
                             for _ in 0..length {
-                                match self.reply(rdb::read_bytes, rdb_handler, cmd_handler)? {
+                                match self.reply(io::read_bytes, rdb_handler, cmd_handler)? {
                                     Bytes(resp) => {
                                         result.push(resp);
                                     }
@@ -557,6 +564,39 @@ pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> 
         writer.write(&[CR, LF])?;
     }
     writer.flush()
+}
+
+// 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
+pub(crate) fn read_bytes(input: &mut Conn, length: isize,
+                         _: &mut dyn RdbHandler,
+                         _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    if length > 0 {
+        let mut bytes = vec![0; length as usize];
+        input.read_exact(&mut bytes)?;
+        let end = &mut [0; 2];
+        input.read_exact(end)?;
+        if end == b"\r\n" {
+            return Ok(Bytes(bytes));
+        } else {
+            panic!("Expect CRLF after bulk string, but got: {:?}", end);
+        }
+    } else if length == 0 {
+        // length == 0 代表空字符，后面还有CRLF
+        input.read_exact(&mut [0; 2])?;
+        return Ok(Empty);
+    } else {
+        // length < 0 代表null
+        return Ok(Empty);
+    }
+}
+
+// 跳过rdb的字节
+pub(crate) fn skip(input: &mut Conn,
+                   length: isize,
+                   _: &mut dyn RdbHandler,
+                   _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    std::io::copy(&mut input.input.as_mut().take(length as u64), &mut std::io::sink())?;
+    Ok(Data::Empty)
 }
 
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
