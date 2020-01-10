@@ -10,6 +10,7 @@ mod iter;
 mod lzf;
 pub mod rdb;
 mod io;
+mod tests;
 
 /// 定义redis监听者接口
 ///

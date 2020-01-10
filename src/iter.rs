@@ -3,8 +3,8 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::rdb::{Item, read_zip_list_entry, read_zm_len};
 use crate::io::Conn;
+use crate::rdb::{Item, read_zip_list_entry, read_zm_len};
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -139,7 +139,7 @@ impl Iter for ZipMapIter<'_> {
                 return Ok(Vec::new());
             }
             let free = self.cursor.read_i8()?;
-            let mut value = Vec::with_capacity(zm_len as usize);
+            let mut value = vec![0; zm_len];
             self.cursor.read_exact(&mut value)?;
             self.cursor.set_position(self.cursor.position() + free as u64);
             return Ok(value);
@@ -149,7 +149,7 @@ impl Iter for ZipMapIter<'_> {
                 self.has_more = false;
                 return Err(Error::new(ErrorKind::NotFound, "No element left"));
             }
-            let mut field = Vec::with_capacity(zm_len as usize);
+            let mut field = vec![0; zm_len];
             self.cursor.read_exact(&mut field)?;
             return Ok(field);
         }

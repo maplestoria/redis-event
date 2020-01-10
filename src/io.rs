@@ -4,6 +4,7 @@
 
 use std::any::Any;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
+use std::fs::File;
 use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
 
@@ -28,6 +29,10 @@ pub(crate) struct Conn {
     pub(crate) input: Box<dyn ReadWrite>,
     len: i64,
     marked: bool,
+}
+
+pub(crate) fn from_file(file: File) -> Conn {
+    Conn { input: Box::new(file), len: 0, marked: false }
 }
 
 pub(crate) fn new(input: TcpStream) -> Conn {
@@ -283,7 +288,7 @@ impl Conn {
                 return Ok(NAN);
             }
             _ => {
-                let mut buff = Vec::with_capacity(len as usize);
+                let mut buff = vec![0; len as usize];
                 self.read_exact(&mut buff)?;
                 let score_str = to_string(buff);
                 let score = score_str.parse::<f64>().unwrap();
