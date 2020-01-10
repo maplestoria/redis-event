@@ -9,8 +9,7 @@ pub mod listener;
 mod iter;
 mod lzf;
 pub mod rdb;
-mod io;
-mod tests;
+pub mod io;
 
 /// 定义redis监听者接口
 ///

@@ -31,17 +31,17 @@ impl ReadWrite for File {
     }
 }
 
-pub(crate) struct Conn {
+pub struct Conn {
     pub(crate) input: Box<dyn ReadWrite>,
     len: i64,
     marked: bool,
 }
 
-pub(crate) fn from_file(file: File) -> Conn {
+pub fn from_file(file: File) -> Conn {
     Conn { input: Box::new(file), len: 0, marked: false }
 }
 
-pub(crate) fn new(input: TcpStream) -> Conn {
+pub fn new(input: TcpStream) -> Conn {
     Conn { input: Box::new(input), len: 0, marked: false }
 }
 
