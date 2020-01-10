@@ -1,5 +1,5 @@
 pub mod standalone {
-    use std::io::{BufWriter, Result, Write};
+    use std::io::Result;
     use std::net::TcpStream;
     use std::result::Result::Ok;
     use std::sync::mpsc;
@@ -7,16 +7,16 @@ pub mod standalone {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
-    use crate::{cmd, CommandHandler, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, to_string};
+    use crate::{cmd, CommandHandler, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, resp, to_string};
     use crate::config::Config;
     use crate::rdb::Data;
     use crate::rdb::Data::{Bytes, Empty};
-    use crate::resp::{Conn, CR, DOLLAR, LF, STAR};
+    use crate::resp::{Conn, send};
     
     // 用于监听单个Redis实例的事件
     pub struct Listener {
         config: Config,
-        conn: Option<Conn>,
+        conn: Option<Conn<TcpStream>>,
         rdb_listener: Box<dyn RdbHandler>,
         cmd_listener: Box<dyn CommandHandler>,
         t_heartbeat: HeartbeatWorker,
@@ -27,13 +27,13 @@ pub mod standalone {
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
             println!("connected to server!");
-            let stream_boxed = stream.try_clone();
+            let mut stream_boxed = stream.try_clone();
             let stream = stream;
             let (sender, receiver) = mpsc::channel();
             
             let t = thread::spawn(move || {
                 let mut offset = 0;
-                let output = stream_boxed.as_ref().unwrap();
+                let output = stream_boxed.as_mut().unwrap();
                 let mut timer = Instant::now();
                 let half_sec = Duration::from_millis(500);
                 loop {
@@ -60,7 +60,7 @@ pub mod standalone {
             
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
             self.sender = Some(sender);
-            self.conn = Option::Some(Conn::new(stream));
+            self.conn = Option::Some(resp::new(stream));
             Ok(())
         }
         
@@ -73,14 +73,14 @@ pub mod standalone {
             Ok(())
         }
         
-        //        fn send_port(&mut self) -> Result<()> {
-//            let conn = self.conn.as_mut().unwrap();
-//            let port = conn.input.input.local_addr()?.port().to_string();
-//            let port = port.as_bytes();
-//            conn.send(b"REPLCONF", &[b"listening-port", port])?;
-//            conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
-//            Ok(())
-//        }
+        fn send_port(&mut self) -> Result<()> {
+            let conn = self.conn.as_mut().unwrap();
+            let port = conn.input.local_addr()?.port().to_string();
+            let port = port.as_bytes();
+            conn.send(b"REPLCONF", &[b"listening-port", port])?;
+            conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+            Ok(())
+        }
         
         pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
             self.rdb_listener = listener
@@ -149,43 +149,18 @@ pub mod standalone {
         }
         
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-            // read begin
+            // TODO 获取到读取了多少个字节
             let conn = self.conn.as_mut().unwrap();
-            conn.mark();
             let cmd = conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
-            let read_len = conn.unmark()?;
-            self.config.repl_offset += read_len;
-            self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
             return cmd;
-            // read end, and get total bytes read
         }
-    }
-    
-    fn send<T: Write>(output: T, command: &[u8], args: &[&[u8]]) -> Result<()> {
-        let mut writer = BufWriter::new(output);
-        writer.write(&[STAR])?;
-        let args_len = args.len() + 1;
-        writer.write(&args_len.to_string().into_bytes())?;
-        writer.write(&[CR, LF, DOLLAR])?;
-        writer.write(&command.len().to_string().into_bytes())?;
-        writer.write(&[CR, LF])?;
-        writer.write(command)?;
-        writer.write(&[CR, LF])?;
-        for arg in args {
-            writer.write(&[DOLLAR])?;
-            writer.write(&arg.len().to_string().into_bytes())?;
-            writer.write(&[CR, LF])?;
-            writer.write(arg)?;
-            writer.write(&[CR, LF])?;
-        }
-        writer.flush()
     }
     
     impl RedisListener for Listener {
         fn open(&mut self) -> Result<()> {
             self.connect()?;
             self.auth()?;
-//            self.send_port()?;
+            self.send_port()?;
             while !self.start_sync()? {
                 sleep(Duration::from_secs(5));
             }
@@ -195,9 +170,7 @@ pub mod standalone {
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                    Ok(Data::BytesVec(data)) => {
-                        cmd::parse(data, &mut self.cmd_listener);
-                    }
+                    Ok(Data::BytesVec(data)) => cmd::parse(data, &mut self.cmd_listener),
                     Err(err) => return Err(err),
                     Ok(Empty) => {}
                 }

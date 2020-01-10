@@ -2,28 +2,26 @@
  处理redis的响应数据
 */
 
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::io::{BufWriter, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
 
-use byteorder::{ByteOrder, ReadBytesExt};
+use byteorder::ReadBytesExt;
 
 use crate::{CommandHandler, rdb, RdbHandler, to_string};
 use crate::rdb::Data;
 use crate::rdb::Data::{Bytes, BytesVec, Empty};
 
-pub(crate) struct Conn {
-    pub(crate) input: TcpStream,
-    len: i64,
-    marked: bool,
+pub(crate) struct Conn<T> {
+    pub(crate) input: Box<T>,
 }
 
-impl Conn {
-    pub(crate) fn new(input: TcpStream) -> Conn {
-        Conn { input, len: 0, marked: false }
-    }
-    
+pub(crate) fn new(input: TcpStream) -> Conn<TcpStream> {
+    Conn { input: Box::new(input) }
+}
+
+impl<T: Read + Write> Conn<T> {
     pub(crate) fn reply(&mut self,
-                        func: fn(input: &mut TcpStream, isize,
+                        func: fn(input: &mut dyn Read, isize,
                                  &mut dyn RdbHandler,
                                  &mut dyn CommandHandler,
                         ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
@@ -122,74 +120,32 @@ impl Conn {
         }
     }
     
-    pub(crate) fn mark(&mut self) {
-        self.marked = true;
-    }
-    
-    pub(crate) fn unmark(&mut self) -> Result<i64> {
-        if self.marked {
-            let len = self.len;
-            self.len = 0;
-            self.marked = false;
-            return Ok(len);
-        }
-        return Err(Error::new(ErrorKind::Other, "not marked"));
-    }
-    
     pub(crate) fn send(&mut self, command: &[u8], args: &[&[u8]]) -> Result<()> {
-        let writer = &mut self.input;
-        writer.write(&[STAR])?;
-        let args_len = args.len() + 1;
-        writer.write(&args_len.to_string().into_bytes())?;
-        writer.write(&[CR, LF, DOLLAR])?;
-        writer.write(&command.len().to_string().into_bytes())?;
-        writer.write(&[CR, LF])?;
-        writer.write(command)?;
-        writer.write(&[CR, LF])?;
-        for arg in args {
-            writer.write(&[DOLLAR])?;
-            writer.write(&arg.len().to_string().into_bytes())?;
-            writer.write(&[CR, LF])?;
-            writer.write(arg)?;
-            writer.write(&[CR, LF])?;
-        }
-        writer.flush()?;
+        send(&mut self.input, command, args)?;
         Ok(())
-    }
-    
-    pub(crate) fn read_u8(&mut self) -> Result<u8> {
-        let mut buf = [0; 1];
-        self.input.read_exact(&mut buf)?;
-        if self.marked {
-            self.len += 1;
-        };
-        Ok(buf[0])
-    }
-    
-    pub(crate) fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
-        self.input.read_exact(buf)?;
-        if self.marked {
-            self.len += buf.len() as i64;
-        };
-        Ok(())
-    }
-    
-    pub(crate) fn read_u64<O: ByteOrder>(&mut self) -> Result<u64> {
-        let int = self.input.read_u64::<O>()?;
-        if self.marked {
-            self.len += 8;
-        };
-        Ok(int)
-    }
-    
-    pub(crate) fn read_i8(&mut self) -> Result<i8> {
-        let int = self.input.read_i8()?;
-        if self.marked {
-            self.len += 1;
-        };
-        Ok(int)
     }
 }
+
+pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> Result<()> {
+    let mut writer = BufWriter::new(output);
+    writer.write(&[STAR])?;
+    let args_len = args.len() + 1;
+    writer.write(&args_len.to_string().into_bytes())?;
+    writer.write(&[CR, LF, DOLLAR])?;
+    writer.write(&command.len().to_string().into_bytes())?;
+    writer.write(&[CR, LF])?;
+    writer.write(command)?;
+    writer.write(&[CR, LF])?;
+    for arg in args {
+        writer.write(&[DOLLAR])?;
+        writer.write(&arg.len().to_string().into_bytes())?;
+        writer.write(&[CR, LF])?;
+        writer.write(arg)?;
+        writer.write(&[CR, LF])?;
+    }
+    writer.flush()
+}
+
 
 // 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
 pub(crate) const CR: u8 = b'\r';

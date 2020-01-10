@@ -1,6 +1,5 @@
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::io::{Cursor, Read, Result};
-use std::net::TcpStream;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
@@ -8,19 +7,10 @@ use crate::{CommandHandler, lzf, RdbHandler, to_string};
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::Data::{Bytes, Empty};
 
-pub struct Parser<T> {
-    input: T,
-    visitor: Visitor,
-}
-
-pub struct Visitor {
-    pub(crate) input: Box<dyn Read>
-}
-
-impl Visitor {
+pub(crate) trait ReadResp: Read + Sized {
     // 读取redis响应中下一条数据的长度
-    pub(crate) fn read_length(&mut self) -> Result<(isize, bool)> {
-        let byte = self.input.read_u8()?;
+    fn read_length(&mut self) -> Result<(isize, bool)> {
+        let byte = self.read_u8()?;
         let _type = (byte & 0xC0) >> 6;
         
         let mut result = -1;
@@ -32,7 +22,7 @@ impl Visitor {
         } else if _type == RDB_6BITLEN {
             result = (byte & 0x3F) as isize;
         } else if _type == RDB_14BITLEN {
-            let next_byte = self.input.read_u8()?;
+            let next_byte = self.read_u8()?;
             result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
         } else if byte == RDB_32BITLEN {
             result = self.read_integer(4, true)?;
@@ -43,9 +33,9 @@ impl Visitor {
     }
     
     // 从流中读取一个Integer
-    pub(crate) fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
+    fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
         let mut buff = vec![0; size as usize];
-        self.input.read_exact(&mut buff)?;
+        self.read_exact(&mut buff)?;
         let mut cursor = Cursor::new(&buff);
         
         if is_big_endian {
@@ -69,12 +59,12 @@ impl Visitor {
     }
     
     // 从流中读取一个string
-    pub(crate) fn read_string(&mut self) -> Result<Vec<u8>> {
+    fn read_string(&mut self) -> Result<Vec<u8>> {
         let (length, is_encoded) = self.read_length()?;
         if is_encoded {
             match length {
                 RDB_ENC_INT8 => {
-                    let int = self.input.read_i8()?;
+                    let int = self.read_i8()?;
                     return Ok(int.to_string().into_bytes());
                 }
                 RDB_ENC_INT16 => {
@@ -89,7 +79,7 @@ impl Visitor {
                     let (compressed_len, _) = self.read_length()?;
                     let (origin_len, _) = self.read_length()?;
                     let mut compressed = vec![0; compressed_len as usize];
-                    self.input.read_exact(&mut compressed)?;
+                    self.read_exact(&mut compressed)?;
                     let mut origin = vec![0; origin_len as usize];
                     lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
                     return Ok(origin);
@@ -98,13 +88,13 @@ impl Visitor {
             };
         };
         let mut buff = vec![0; length as usize];
-        self.input.read_exact(&mut buff)?;
+        self.read_exact(&mut buff)?;
         Ok(buff)
     }
     
     // 从流中读取一个double
-    pub(crate) fn read_double(&mut self) -> Result<f64> {
-        let len = self.input.read_u8()?;
+    fn read_double(&mut self) -> Result<f64> {
+        let len = self.read_u8()?;
         match len {
             255 => {
                 return Ok(NEG_INFINITY);
@@ -117,7 +107,7 @@ impl Visitor {
             }
             _ => {
                 let mut buff = Vec::with_capacity(len as usize);
-                self.input.read_exact(&mut buff)?;
+                self.read_exact(&mut buff)?;
                 let score_str = to_string(buff);
                 let score = score_str.parse::<f64>().unwrap();
                 return Ok(score);
@@ -126,10 +116,9 @@ impl Visitor {
     }
     
     // 根据传入的数据类型，从流中读取对应类型的数据
-    pub(crate) fn read_object(&mut self,
-                              value_type: u8,
-                              rdb_handlers: &mut dyn RdbHandler,
-                              meta: &Meta) -> Result<()> {
+    fn read_object(&mut self, value_type: u8,
+                   rdb_handlers: &mut dyn RdbHandler,
+                   meta: &Meta) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
                 let key = self.read_string()?;
@@ -139,7 +128,7 @@ impl Visitor {
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = StrValIter { count, visitor: self };
+                let mut iter = StrValIter { count, input: Box::new(self) };
                 
                 let mut has_more = true;
                 while has_more {
@@ -162,7 +151,7 @@ impl Visitor {
             RDB_TYPE_ZSET => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 1, visitor: self };
+                let mut iter = SortedSetIter { count, v: 1, input: Box::new(self) };
                 
                 let mut has_more = true;
                 while has_more {
@@ -181,7 +170,7 @@ impl Visitor {
             RDB_TYPE_ZSET_2 => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 2, visitor: self };
+                let mut iter = SortedSetIter { count, v: 2, input: Box::new(self) };
                 
                 let mut has_more = true;
                 while has_more {
@@ -200,7 +189,7 @@ impl Visitor {
             RDB_TYPE_HASH => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = StrValIter { count: count * 2, visitor: self };
+                let mut iter = StrValIter { count: count * 2, input: Box::new(self) };
                 
                 let mut has_more = true;
                 while has_more {
@@ -349,7 +338,7 @@ impl Visitor {
             RDB_TYPE_LIST_QUICKLIST => {
                 let key = self.read_string()?;
                 let (count, _) = self.read_length()?;
-                let mut iter = QuickListIter { len: -1, count, visitor: self, cursor: Option::None };
+                let mut iter = QuickListIter { len: -1, count, input: Box::new(self), cursor: Option::None };
                 
                 let mut has_more = true;
                 while has_more {
@@ -380,114 +369,105 @@ impl Visitor {
     }
 }
 
-impl<T: Read> Parser<T> {
-    fn parse(&mut self, rdb_handlers: &mut dyn RdbHandler) -> Result<()> {
-        rdb_handlers.handle(Object::BOR);
-        let mut bytes = vec![0; 5];
-        // 开头5个字节: REDIS
-        self.input.read_exact(&mut bytes)?;
-        // 4个字节: rdb版本
-        self.input.read_exact(&mut bytes[..=3])?;
-        let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
-        let rdb_version = rdb_version.parse::<isize>().unwrap();
-        
-        let mut meta = Meta {
-            db: 0,
-            expired_type: None,
-            expired_time: None,
-        };
-        
-        loop {
-            let data_type = self.input.read_u8()?;
-            match data_type {
-                RDB_OPCODE_AUX => {
-                    let field_name = self.visitor.read_string()?;
-                    let field_val = self.visitor.read_string()?;
-                    let field_name = to_string(field_name);
-                    let field_val = to_string(field_val);
-                    println!("{}:{}", field_name, field_val);
-                }
-                RDB_OPCODE_SELECTDB => {
-                    let (db, _) = self.visitor.read_length()?;
-                    meta.db = db;
-                }
-                RDB_OPCODE_RESIZEDB => {
-                    let (db, _) = self.visitor.read_length()?;
-                    println!("db total keys: {}", db);
-                    let (db, _) = self.visitor.read_length()?;
-                    println!("db expired keys: {}", db);
-                }
-                RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
-                    if data_type == RDB_OPCODE_EXPIRETIME_MS {
-                        let expired_time = self.visitor.read_integer(8, false)?;
-                        meta.expired_time = Option::Some(expired_time as i64);
-                        meta.expired_type = Option::Some(ExpireType::Millisecond);
-                    } else {
-                        let expired_time = self.visitor.read_integer(4, false)?;
-                        meta.expired_time = Option::Some(expired_time as i64);
-                        meta.expired_type = Option::Some(ExpireType::Second);
-                    }
-                    let value_type = self.input.read_u8()?;
-                    match value_type {
-                        RDB_OPCODE_FREQ => {
-                            self.input.read_u8()?;
-                            let value_type = self.input.read_u8()?;
-                            self.visitor.read_object(value_type, rdb_handlers, &meta)?;
-                        }
-                        RDB_OPCODE_IDLE => {
-                            self.visitor.read_length()?;
-                            let value_type = self.input.read_u8()?;
-                            self.visitor.read_object(value_type, rdb_handlers, &meta)?;
-                        }
-                        _ => {
-                            self.visitor.read_object(value_type, rdb_handlers, &meta)?;
-                        }
-                    }
-                }
-                RDB_OPCODE_FREQ => {
-                    self.input.read_u8()?;
-                    let value_type = self.input.read_u8()?;
-                    self.visitor.read_object(value_type, rdb_handlers, &meta)?;
-                }
-                RDB_OPCODE_IDLE => {
-                    self.visitor.read_length()?;
-                    let value_type = self.input.read_u8()?;
-                    self.visitor.read_object(value_type, rdb_handlers, &meta)?;
-                }
-                RDB_OPCODE_MODULE_AUX => {
-                    // TODO
-                }
-                RDB_OPCODE_EOF => {
-                    if rdb_version >= 5 {
-                        self.visitor.read_integer(8, true)?;
-                    }
-                    break;
-                }
-                _ => {
-                    self.visitor.read_object(data_type, rdb_handlers, &meta)?;
-                }
-            };
-        };
-        rdb_handlers.handle(Object::EOR);
-        Ok(())
-    }
-}
+impl<R: Read + Sized> ReadResp for R {}
 
 // 读取、解析rdb
-pub(crate) fn parse(input: &mut TcpStream,
+pub(crate) fn parse(mut input: &mut dyn Read,
                     _: isize,
                     rdb_handlers: &mut dyn RdbHandler,
                     _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    let mut parser = Parser {
-        input: input.try_clone().unwrap(),
-        visitor: Visitor { input: Box::new(input.try_clone().unwrap()) },
+    rdb_handlers.handle(Object::BOR);
+    let mut bytes = vec![0; 5];
+    // 开头5个字节: REDIS
+    input.read_exact(&mut bytes)?;
+    // 4个字节: rdb版本
+    input.read_exact(&mut bytes[..=3])?;
+    let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
+    let rdb_version = rdb_version.parse::<isize>().unwrap();
+    
+    let mut meta = Meta {
+        db: 0,
+        expired_type: None,
+        expired_time: None,
     };
-    parser.parse(rdb_handlers)?;
+    
+    loop {
+        let data_type = input.read_u8()?;
+        match data_type {
+            RDB_OPCODE_AUX => {
+                let field_name = input.read_string()?;
+                let field_val = input.read_string()?;
+                let field_name = to_string(field_name);
+                let field_val = to_string(field_val);
+                println!("{}:{}", field_name, field_val);
+            }
+            RDB_OPCODE_SELECTDB => {
+                let (db, _) = input.read_length()?;
+                meta.db = db;
+            }
+            RDB_OPCODE_RESIZEDB => {
+                let (db, _) = input.read_length()?;
+                println!("db total keys: {}", db);
+                let (db, _) = input.read_length()?;
+                println!("db expired keys: {}", db);
+            }
+            RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
+                if data_type == RDB_OPCODE_EXPIRETIME_MS {
+                    let expired_time = input.read_integer(8, false)?;
+                    meta.expired_time = Option::Some(expired_time as i64);
+                    meta.expired_type = Option::Some(ExpireType::Millisecond);
+                } else {
+                    let expired_time = input.read_integer(4, false)?;
+                    meta.expired_time = Option::Some(expired_time as i64);
+                    meta.expired_type = Option::Some(ExpireType::Second);
+                }
+                let value_type = input.read_u8()?;
+                match value_type {
+                    RDB_OPCODE_FREQ => {
+                        input.read_u8()?;
+                        let value_type = input.read_u8()?;
+                        input.read_object(value_type, rdb_handlers, &meta)?;
+                    }
+                    RDB_OPCODE_IDLE => {
+                        input.read_length()?;
+                        let value_type = input.read_u8()?;
+                        input.read_object(value_type, rdb_handlers, &meta)?;
+                    }
+                    _ => {
+                        input.read_object(value_type, rdb_handlers, &meta)?;
+                    }
+                }
+            }
+            RDB_OPCODE_FREQ => {
+                input.read_u8()?;
+                let value_type = input.read_u8()?;
+                input.read_object(value_type, rdb_handlers, &meta)?;
+            }
+            RDB_OPCODE_IDLE => {
+                input.read_length()?;
+                let value_type = input.read_u8()?;
+                input.read_object(value_type, rdb_handlers, &meta)?;
+            }
+            RDB_OPCODE_MODULE_AUX => {
+                // TODO
+            }
+            RDB_OPCODE_EOF => {
+                if rdb_version >= 5 {
+                    input.read_integer(8, true)?;
+                }
+                break;
+            }
+            _ => {
+                input.read_object(data_type, rdb_handlers, &meta)?;
+            }
+        };
+    };
+    rdb_handlers.handle(Object::EOR);
     Ok(Empty)
 }
 
 // 跳过rdb的字节
-pub(crate) fn skip(input: &mut TcpStream,
+pub(crate) fn skip(input: &mut dyn Read,
                    length: isize,
                    _: &mut dyn RdbHandler,
                    _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
@@ -496,7 +476,7 @@ pub(crate) fn skip(input: &mut TcpStream,
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut TcpStream, length: isize,
+pub(crate) fn read_bytes(input: &mut dyn Read, length: isize,
                          _: &mut dyn RdbHandler,
                          _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {

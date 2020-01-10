@@ -3,7 +3,8 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::rdb::{Item, read_zip_list_entry, read_zm_len, Visitor};
+use crate::rdb::{Item, read_zip_list_entry, read_zm_len};
+use crate::rdb::ReadResp;
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -16,13 +17,13 @@ pub trait Iter {
 // 字符串类型的值迭代器
 pub(crate) struct StrValIter<'a> {
     pub(crate) count: isize,
-    pub(crate) visitor: &'a mut Visitor,
+    pub(crate) input: Box<&'a mut dyn Read>,
 }
 
 impl Iter for StrValIter<'_> {
     fn next(&mut self) -> io::Result<Vec<u8>> {
         while self.count > 0 {
-            let val = self.visitor.read_string()?;
+            let val = self.input.read_string()?;
             self.count -= 1;
             return Ok(val);
         }
@@ -34,14 +35,14 @@ impl Iter for StrValIter<'_> {
 pub(crate) struct QuickListIter<'a> {
     pub(crate) len: isize,
     pub(crate) count: isize,
-    pub(crate) visitor: &'a mut Visitor,
+    pub(crate) input: Box<&'a mut dyn Read>,
     pub(crate) cursor: Option<Cursor<Vec<u8>>>,
 }
 
 impl Iter for QuickListIter<'_> {
     fn next(&mut self) -> io::Result<Vec<u8>> {
         if self.len == -1 && self.count > 0 {
-            let data = self.visitor.read_string()?;
+            let data = self.input.read_string()?;
             self.cursor = Option::Some(Cursor::new(data));
             // 跳过ZL_BYTES和ZL_TAIL
             let cursor = self.cursor.as_mut().unwrap();
@@ -98,18 +99,18 @@ pub(crate) struct SortedSetIter<'a> {
     /// v = 1, zset
     /// v = 2, zset2
     pub(crate) v: u8,
-    pub(crate) visitor: &'a mut Visitor,
+    pub(crate) input: Box<&'a mut dyn Read>,
 }
 
 impl SortedSetIter<'_> {
     pub(crate) fn next(&mut self) -> io::Result<Item> {
         if self.count > 0 {
-            let member = self.visitor.read_string()?;
+            let member = self.input.read_string()?;
             let score;
             if self.v == 1 {
-                score = self.visitor.read_double()?;
+                score = self.input.read_double()?;
             } else {
-                let score_u64 = self.visitor.input.read_u64::<LittleEndian>()?;
+                let score_u64 = self.input.read_u64::<LittleEndian>()?;
                 score = f64::from_bits(score_u64);
             }
             self.count -= 1;
