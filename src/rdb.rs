@@ -1,196 +1,504 @@
+use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::io::{Cursor, Read, Result};
+use std::net::TcpStream;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, RdbHandler, to_string};
-use crate::conn::Conn;
+use crate::{CommandHandler, lzf, RdbHandler, to_string};
+use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::Data::{Bytes, Empty};
 
-// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
-pub(crate) const CR: u8 = b'\r';
-pub(crate) const LF: u8 = b'\n';
-// 代表array响应
-pub(crate) const STAR: u8 = b'*';
-// 代表bulk string响应
-pub(crate) const DOLLAR: u8 = b'$';
-// 代表simple string响应
-pub(crate) const PLUS: u8 = b'+';
-// 代表error响应
-pub(crate) const MINUS: u8 = b'-';
-// 代表integer响应
-pub(crate) const COLON: u8 = b':';
+pub struct Parser<T> {
+    input: T,
+    visitor: Visitor,
+}
 
-/// Map object types to RDB object types.
-///
-pub(crate) const RDB_TYPE_STRING: u8 = 0;
-pub(crate) const RDB_TYPE_LIST: u8 = 1;
-pub(crate) const RDB_TYPE_SET: u8 = 2;
-pub(crate) const RDB_TYPE_ZSET: u8 = 3;
-pub(crate) const RDB_TYPE_HASH: u8 = 4;
-/// ZSET version 2 with doubles stored in binary.
-pub(crate) const RDB_TYPE_ZSET_2: u8 = 5;
-pub(crate) const RDB_TYPE_MODULE: u8 = 6;
-/// Module value with annotations for parsing without
-/// the generating module being loaded.
-pub(crate) const RDB_TYPE_MODULE_2: u8 = 7;
+pub struct Visitor {
+    pub(crate) input: Box<dyn Read>
+}
 
-/// Object types for encoded objects.
-///
-pub(crate) const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
-pub(crate) const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
-pub(crate) const RDB_TYPE_SET_INTSET: u8 = 11;
-pub(crate) const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
-pub(crate) const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
-pub(crate) const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
-pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
+impl Visitor {
+    // 读取redis响应中下一条数据的长度
+    pub(crate) fn read_length(&mut self) -> Result<(isize, bool)> {
+        let byte = self.input.read_u8()?;
+        let _type = (byte & 0xC0) >> 6;
+        
+        let mut result = -1;
+        let mut is_encoded = false;
+        
+        if _type == RDB_ENCVAL {
+            result = (byte & 0x3F) as isize;
+            is_encoded = true;
+        } else if _type == RDB_6BITLEN {
+            result = (byte & 0x3F) as isize;
+        } else if _type == RDB_14BITLEN {
+            let next_byte = self.input.read_u8()?;
+            result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
+        } else if byte == RDB_32BITLEN {
+            result = self.read_integer(4, true)?;
+        } else if byte == RDB_64BITLEN {
+            result = self.read_integer(8, true)?;
+        };
+        Ok((result, is_encoded))
+    }
+    
+    // 从流中读取一个Integer
+    pub(crate) fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
+        let mut buff = vec![0; size as usize];
+        self.input.read_exact(&mut buff)?;
+        let mut cursor = Cursor::new(&buff);
+        
+        if is_big_endian {
+            if size == 2 {
+                return Ok(cursor.read_i16::<BigEndian>()? as isize);
+            } else if size == 4 {
+                return Ok(cursor.read_i32::<BigEndian>()? as isize);
+            } else if size == 8 {
+                return Ok(cursor.read_i64::<BigEndian>()? as isize);
+            };
+        } else {
+            if size == 2 {
+                return Ok(cursor.read_i16::<LittleEndian>()? as isize);
+            } else if size == 4 {
+                return Ok(cursor.read_i32::<LittleEndian>()? as isize);
+            } else if size == 8 {
+                return Ok(cursor.read_i64::<LittleEndian>()? as isize);
+            };
+        }
+        panic!("Invalid integer size: {}", size)
+    }
+    
+    // 从流中读取一个string
+    pub(crate) fn read_string(&mut self) -> Result<Vec<u8>> {
+        let (length, is_encoded) = self.read_length()?;
+        if is_encoded {
+            match length {
+                RDB_ENC_INT8 => {
+                    let int = self.input.read_i8()?;
+                    return Ok(int.to_string().into_bytes());
+                }
+                RDB_ENC_INT16 => {
+                    let int = self.read_integer(2, false)?;
+                    return Ok(int.to_string().into_bytes());
+                }
+                RDB_ENC_INT32 => {
+                    let int = self.read_integer(4, false)?;
+                    return Ok(int.to_string().into_bytes());
+                }
+                RDB_ENC_LZF => {
+                    let (compressed_len, _) = self.read_length()?;
+                    let (origin_len, _) = self.read_length()?;
+                    let mut compressed = vec![0; compressed_len as usize];
+                    self.input.read_exact(&mut compressed)?;
+                    let mut origin = vec![0; origin_len as usize];
+                    lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
+                    return Ok(origin);
+                }
+                _ => panic!("Invalid string length: {}", length)
+            };
+        };
+        let mut buff = vec![0; length as usize];
+        self.input.read_exact(&mut buff)?;
+        Ok(buff)
+    }
+    
+    // 从流中读取一个double
+    pub(crate) fn read_double(&mut self) -> Result<f64> {
+        let len = self.input.read_u8()?;
+        match len {
+            255 => {
+                return Ok(NEG_INFINITY);
+            }
+            254 => {
+                return Ok(INFINITY);
+            }
+            253 => {
+                return Ok(NAN);
+            }
+            _ => {
+                let mut buff = Vec::with_capacity(len as usize);
+                self.input.read_exact(&mut buff)?;
+                let score_str = to_string(buff);
+                let score = score_str.parse::<f64>().unwrap();
+                return Ok(score);
+            }
+        }
+    }
+    
+    // 根据传入的数据类型，从流中读取对应类型的数据
+    pub(crate) fn read_object(&mut self,
+                              value_type: u8,
+                              rdb_handlers: &mut dyn RdbHandler,
+                              meta: &Meta) -> Result<()> {
+        match value_type {
+            RDB_TYPE_STRING => {
+                let key = self.read_string()?;
+                let value = self.read_string()?;
+                rdb_handlers.handle(Object::String(KeyValue { key: &key, value: &value, meta }));
+            }
+            RDB_TYPE_LIST | RDB_TYPE_SET => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = StrValIter { count, visitor: self };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if value_type == RDB_TYPE_LIST {
+                        rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
+                    } else {
+                        rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
+                    }
+                }
+            }
+            RDB_TYPE_ZSET => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = SortedSetIter { count, v: 1, visitor: self };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
+                }
+            }
+            RDB_TYPE_ZSET_2 => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = SortedSetIter { count, v: 2, visitor: self };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
+                }
+            }
+            RDB_TYPE_HASH => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = StrValIter { count: count * 2, visitor: self };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let name;
+                        let value;
+                        if let Ok(next_val) = iter.next() {
+                            name = next_val;
+                            value = iter.next().expect("missing hash field value");
+                            val.push(Field { name, value });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                }
+            }
+            RDB_TYPE_HASH_ZIPMAP => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(&bytes);
+                cursor.set_position(1);
+                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let name;
+                        let value;
+                        if let Ok(next_val) = iter.next() {
+                            name = next_val;
+                            value = iter.next().expect("missing hash field value");
+                            val.push(Field { name, value });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                }
+            }
+            RDB_TYPE_LIST_ZIPLIST => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
+                }
+            }
+            RDB_TYPE_HASH_ZIPLIST => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let name;
+                        let value;
+                        if let Ok(next_val) = iter.next() {
+                            name = next_val;
+                            value = iter.next().expect("missing hash field value");
+                            val.push(Field { name, value });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                }
+            }
+            RDB_TYPE_ZSET_ZIPLIST => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let member;
+                        let score: f64;
+                        if let Ok(next_val) = iter.next() {
+                            member = next_val;
+                            let score_str = to_string(iter.next()
+                                .expect("missing sorted set element's score"));
+                            score = score_str.parse::<f64>().unwrap();
+                            val.push(Item { member, score });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
+                }
+            }
+            RDB_TYPE_SET_INTSET => {
+                let key = self.read_string()?;
+                let bytes = self.read_string()?;
+                let mut cursor = Cursor::new(&bytes);
+                let encoding = cursor.read_i32::<LittleEndian>()?;
+                let length = cursor.read_u32::<LittleEndian>()?;
+                let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
+                }
+            }
+            RDB_TYPE_LIST_QUICKLIST => {
+                let key = self.read_string()?;
+                let (count, _) = self.read_length()?;
+                let mut iter = QuickListIter { len: -1, count, visitor: self, cursor: Option::None };
+                
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
+                }
+            }
+            RDB_TYPE_MODULE => {
+                // TODO
+            }
+            RDB_TYPE_MODULE_2 => {
+                // TODO
+            }
+            RDB_TYPE_STREAM_LISTPACKS => {
+                // TODO
+            }
+            _ => panic!("unknown data type: {}", value_type)
+        }
+        Ok(())
+    }
+}
 
-/// Special RDB opcodes
-///
-// Module auxiliary data.
-const RDB_OPCODE_MODULE_AUX: u8 = 247;
-// LRU idle time.
-const RDB_OPCODE_IDLE: u8 = 248;
-// LFU frequency.
-const RDB_OPCODE_FREQ: u8 = 249;
-// RDB aux field.
-const RDB_OPCODE_AUX: u8 = 250;
-// Hash table resize hint.
-const RDB_OPCODE_RESIZEDB: u8 = 251;
-// Expire time in milliseconds.
-const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
-// Old expire time in seconds.
-const RDB_OPCODE_EXPIRETIME: u8 = 253;
-// DB number of the following keys.
-const RDB_OPCODE_SELECTDB: u8 = 254;
-// End of the RDB file.
-const RDB_OPCODE_EOF: u8 = 255;
-
-const ZIP_INT_8BIT: u8 = 254;
-const ZIP_INT_16BIT: u8 = 192;
-const ZIP_INT_24BIT: u8 = 240;
-const ZIP_INT_32BIT: u8 = 208;
-const ZIP_INT_64BIT: u8 = 224;
-
-// 用于包装redis的返回值
-pub(crate) enum Data<B, V> {
-    // 包装Vec<u8>
-    Bytes(B),
-    // 包装Vec<Vec<u8>>
-    BytesVec(V),
-    // 空返回
-    Empty,
+impl<T: Read> Parser<T> {
+    fn parse(&mut self, rdb_handlers: &mut dyn RdbHandler) -> Result<()> {
+        rdb_handlers.handle(Object::BOR);
+        let mut bytes = vec![0; 5];
+        // 开头5个字节: REDIS
+        self.input.read_exact(&mut bytes)?;
+        // 4个字节: rdb版本
+        self.input.read_exact(&mut bytes[..=3])?;
+        let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
+        let rdb_version = rdb_version.parse::<isize>().unwrap();
+        
+        let mut meta = Meta {
+            db: 0,
+            expired_type: None,
+            expired_time: None,
+        };
+        
+        loop {
+            let data_type = self.input.read_u8()?;
+            match data_type {
+                RDB_OPCODE_AUX => {
+                    let field_name = self.visitor.read_string()?;
+                    let field_val = self.visitor.read_string()?;
+                    let field_name = to_string(field_name);
+                    let field_val = to_string(field_val);
+                    println!("{}:{}", field_name, field_val);
+                }
+                RDB_OPCODE_SELECTDB => {
+                    let (db, _) = self.visitor.read_length()?;
+                    meta.db = db;
+                }
+                RDB_OPCODE_RESIZEDB => {
+                    let (db, _) = self.visitor.read_length()?;
+                    println!("db total keys: {}", db);
+                    let (db, _) = self.visitor.read_length()?;
+                    println!("db expired keys: {}", db);
+                }
+                RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
+                    if data_type == RDB_OPCODE_EXPIRETIME_MS {
+                        let expired_time = self.visitor.read_integer(8, false)?;
+                        meta.expired_time = Option::Some(expired_time as i64);
+                        meta.expired_type = Option::Some(ExpireType::Millisecond);
+                    } else {
+                        let expired_time = self.visitor.read_integer(4, false)?;
+                        meta.expired_time = Option::Some(expired_time as i64);
+                        meta.expired_type = Option::Some(ExpireType::Second);
+                    }
+                    let value_type = self.input.read_u8()?;
+                    match value_type {
+                        RDB_OPCODE_FREQ => {
+                            self.input.read_u8()?;
+                            let value_type = self.input.read_u8()?;
+                            self.visitor.read_object(value_type, rdb_handlers, &meta)?;
+                        }
+                        RDB_OPCODE_IDLE => {
+                            self.visitor.read_length()?;
+                            let value_type = self.input.read_u8()?;
+                            self.visitor.read_object(value_type, rdb_handlers, &meta)?;
+                        }
+                        _ => {
+                            self.visitor.read_object(value_type, rdb_handlers, &meta)?;
+                        }
+                    }
+                }
+                RDB_OPCODE_FREQ => {
+                    self.input.read_u8()?;
+                    let value_type = self.input.read_u8()?;
+                    self.visitor.read_object(value_type, rdb_handlers, &meta)?;
+                }
+                RDB_OPCODE_IDLE => {
+                    self.visitor.read_length()?;
+                    let value_type = self.input.read_u8()?;
+                    self.visitor.read_object(value_type, rdb_handlers, &meta)?;
+                }
+                RDB_OPCODE_MODULE_AUX => {
+                    // TODO
+                }
+                RDB_OPCODE_EOF => {
+                    if rdb_version >= 5 {
+                        self.visitor.read_integer(8, true)?;
+                    }
+                    break;
+                }
+                _ => {
+                    self.visitor.read_object(data_type, rdb_handlers, &meta)?;
+                }
+            };
+        };
+        rdb_handlers.handle(Object::EOR);
+        Ok(())
+    }
 }
 
 // 读取、解析rdb
-pub(crate) fn parse(input: &mut Conn,
-                    length: isize,
-                    rdb_handlers: &mut Box<dyn RdbHandler>,
-                    _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    println!("rdb size: {} bytes", length);
-    rdb_handlers.handle(Object::BOR);
-    let mut bytes = vec![0; 5];
-    // 开头5个字节: REDIS
-    input.read_exact(&mut bytes)?;
-    // 4个字节: rdb版本
-    input.read_exact(&mut bytes[..=3])?;
-    let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
-    let rdb_version = rdb_version.parse::<isize>().unwrap();
-    
-    let mut meta = Meta {
-        db: 0,
-        expired_type: None,
-        expired_time: None,
+pub(crate) fn parse(input: &mut TcpStream,
+                    _: isize,
+                    rdb_handlers: &mut dyn RdbHandler,
+                    _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    let mut parser = Parser {
+        input: input.try_clone().unwrap(),
+        visitor: Visitor { input: Box::new(input.try_clone().unwrap()) },
     };
-    
-    loop {
-        let data_type = input.read_u8()?;
-        match data_type {
-            RDB_OPCODE_AUX => {
-                let field_name = input.read_string()?;
-                let field_val = input.read_string()?;
-                let field_name = to_string(field_name);
-                let field_val = to_string(field_val);
-                println!("{}:{}", field_name, field_val);
-            }
-            RDB_OPCODE_SELECTDB => {
-                let (db, _) = input.read_length()?;
-                meta.db = db;
-            }
-            RDB_OPCODE_RESIZEDB => {
-                let (db, _) = input.read_length()?;
-                println!("db total keys: {}", db);
-                let (db, _) = input.read_length()?;
-                println!("db expired keys: {}", db);
-            }
-            RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
-                if data_type == RDB_OPCODE_EXPIRETIME_MS {
-                    let expired_time = input.read_integer(8, false)?;
-                    meta.expired_time = Option::Some(expired_time as i64);
-                    meta.expired_type = Option::Some(ExpireType::Millisecond);
-                } else {
-                    let expired_time = input.read_integer(4, false)?;
-                    meta.expired_time = Option::Some(expired_time as i64);
-                    meta.expired_type = Option::Some(ExpireType::Second);
-                }
-                let value_type = input.read_u8()?;
-                match value_type {
-                    RDB_OPCODE_FREQ => {
-                        input.read_u8()?;
-                        let value_type = input.read_u8()?;
-                        input.read_object(value_type, rdb_handlers, &meta)?;
-                    }
-                    RDB_OPCODE_IDLE => {
-                        input.read_length()?;
-                        let value_type = input.read_u8()?;
-                        input.read_object(value_type, rdb_handlers, &meta)?;
-                    }
-                    _ => {
-                        input.read_object(value_type, rdb_handlers, &meta)?;
-                    }
-                }
-            }
-            RDB_OPCODE_FREQ => {
-                input.read_u8()?;
-                let value_type = input.read_u8()?;
-                input.read_object(value_type, rdb_handlers, &meta)?;
-            }
-            RDB_OPCODE_IDLE => {
-                input.read_length()?;
-                let value_type = input.read_u8()?;
-                input.read_object(value_type, rdb_handlers, &meta)?;
-            }
-            RDB_OPCODE_MODULE_AUX => {
-                // TODO
-            }
-            RDB_OPCODE_EOF => {
-                if rdb_version >= 5 {
-                    input.read_integer(8, true)?;
-                }
-                break;
-            }
-            _ => {
-                input.read_object(data_type, rdb_handlers, &meta)?;
-            }
-        };
-    };
-    rdb_handlers.handle(Object::EOR);
+    parser.parse(rdb_handlers)?;
     Ok(Empty)
 }
 
 // 跳过rdb的字节
-pub(crate) fn skip(input: &mut Conn,
+pub(crate) fn skip(input: &mut TcpStream,
                    length: isize,
-                   _: &mut Box<dyn RdbHandler>,
-                   _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    let stream = input.stream.as_ref();
-    std::io::copy(&mut stream.take(length as u64), &mut std::io::sink())?;
+                   _: &mut dyn RdbHandler,
+                   _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    std::io::copy(&mut input.take(length as u64), &mut std::io::sink())?;
     Ok(Data::Empty)
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut Conn, length: isize,
-                         _: &mut Box<dyn RdbHandler>,
-                         _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+pub(crate) fn read_bytes(input: &mut TcpStream, length: isize,
+                         _: &mut dyn RdbHandler,
+                         _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {
         let mut bytes = vec![0; length as usize];
         input.read_exact(&mut bytes)?;
@@ -355,4 +663,99 @@ pub struct Hash<'a> {
 pub struct Field {
     pub name: Vec<u8>,
     pub value: Vec<u8>,
+}
+
+/// Map object types to RDB object types.
+///
+pub(crate) const RDB_TYPE_STRING: u8 = 0;
+pub(crate) const RDB_TYPE_LIST: u8 = 1;
+pub(crate) const RDB_TYPE_SET: u8 = 2;
+pub(crate) const RDB_TYPE_ZSET: u8 = 3;
+pub(crate) const RDB_TYPE_HASH: u8 = 4;
+/// ZSET version 2 with doubles stored in binary.
+pub(crate) const RDB_TYPE_ZSET_2: u8 = 5;
+pub(crate) const RDB_TYPE_MODULE: u8 = 6;
+/// Module value with annotations for parsing without
+/// the generating module being loaded.
+pub(crate) const RDB_TYPE_MODULE_2: u8 = 7;
+
+/// Object types for encoded objects.
+///
+pub(crate) const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
+pub(crate) const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
+pub(crate) const RDB_TYPE_SET_INTSET: u8 = 11;
+pub(crate) const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
+pub(crate) const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
+pub(crate) const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
+pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
+
+/// Special RDB opcodes
+///
+// Module auxiliary data.
+const RDB_OPCODE_MODULE_AUX: u8 = 247;
+// LRU idle time.
+const RDB_OPCODE_IDLE: u8 = 248;
+// LFU frequency.
+const RDB_OPCODE_FREQ: u8 = 249;
+// RDB aux field.
+const RDB_OPCODE_AUX: u8 = 250;
+// Hash table resize hint.
+const RDB_OPCODE_RESIZEDB: u8 = 251;
+// Expire time in milliseconds.
+const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
+// Old expire time in seconds.
+const RDB_OPCODE_EXPIRETIME: u8 = 253;
+// DB number of the following keys.
+const RDB_OPCODE_SELECTDB: u8 = 254;
+// End of the RDB file.
+const RDB_OPCODE_EOF: u8 = 255;
+
+const ZIP_INT_8BIT: u8 = 254;
+const ZIP_INT_16BIT: u8 = 192;
+const ZIP_INT_24BIT: u8 = 240;
+const ZIP_INT_32BIT: u8 = 208;
+const ZIP_INT_64BIT: u8 = 224;
+
+/// Defines related to the dump file format. To store 32 bits lengths for short
+/// keys requires a lot of space, so we check the most significant 2 bits of
+/// the first byte to interpreter the length:
+///
+/// 00|XXXXXX => if the two MSB are 00 the len is the 6 bits of this byte
+/// 01|XXXXXX XXXXXXXX =>  01, the len is 14 byes, 6 bits + 8 bits of next byte
+/// 10|000000 [32 bit integer] => A full 32 bit len in net byte order will follow
+/// 10|000001 [64 bit integer] => A full 64 bit len in net byte order will follow
+/// 11|OBKIND this means: specially encoded object will follow. The six bits
+///           number specify the kind of object that follows.
+///           See the RDB_ENC_* defines.
+///
+/// Lengths up to 63 are stored using a single byte, most DB keys, and may
+/// values, will fit inside.
+const RDB_ENCVAL: u8 = 3;
+const RDB_6BITLEN: u8 = 0;
+const RDB_14BITLEN: u8 = 1;
+const RDB_32BITLEN: u8 = 0x80;
+const RDB_64BITLEN: u8 = 0x81;
+
+/// When a length of a string object stored on disk has the first two bits
+/// set, the remaining six bits specify a special encoding for the object
+/// accordingly to the following defines:
+///
+/// 8 bit signed integer
+const RDB_ENC_INT8: isize = 0;
+/// 16 bit signed integer
+const RDB_ENC_INT16: isize = 1;
+/// 32 bit signed integer
+const RDB_ENC_INT32: isize = 2;
+/// string compressed with FASTLZ
+const RDB_ENC_LZF: isize = 3;
+const BATCH_SIZE: usize = 64;
+
+// 用于包装redis的返回值
+pub(crate) enum Data<B, V> {
+    // 包装Vec<u8>
+    Bytes(B),
+    // 包装Vec<Vec<u8>>
+    BytesVec(V),
+    // 空返回
+    Empty,
 }
