@@ -1,378 +1,13 @@
-use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::io::{Cursor, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, lzf, RdbHandler, to_string};
-use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
+use crate::{CommandHandler, RdbHandler, to_string};
 use crate::rdb::Data::{Bytes, Empty};
-
-pub(crate) trait ReadResp: Read + Sized {
-    // 读取redis响应中下一条数据的长度
-    fn read_length(&mut self) -> Result<(isize, bool)> {
-        let byte = self.read_u8()?;
-        let _type = (byte & 0xC0) >> 6;
-        
-        let mut result = -1;
-        let mut is_encoded = false;
-        
-        if _type == RDB_ENCVAL {
-            result = (byte & 0x3F) as isize;
-            is_encoded = true;
-        } else if _type == RDB_6BITLEN {
-            result = (byte & 0x3F) as isize;
-        } else if _type == RDB_14BITLEN {
-            let next_byte = self.read_u8()?;
-            result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
-        } else if byte == RDB_32BITLEN {
-            result = self.read_integer(4, true)?;
-        } else if byte == RDB_64BITLEN {
-            result = self.read_integer(8, true)?;
-        };
-        Ok((result, is_encoded))
-    }
-    
-    // 从流中读取一个Integer
-    fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
-        let mut buff = vec![0; size as usize];
-        self.read_exact(&mut buff)?;
-        let mut cursor = Cursor::new(&buff);
-        
-        if is_big_endian {
-            if size == 2 {
-                return Ok(cursor.read_i16::<BigEndian>()? as isize);
-            } else if size == 4 {
-                return Ok(cursor.read_i32::<BigEndian>()? as isize);
-            } else if size == 8 {
-                return Ok(cursor.read_i64::<BigEndian>()? as isize);
-            };
-        } else {
-            if size == 2 {
-                return Ok(cursor.read_i16::<LittleEndian>()? as isize);
-            } else if size == 4 {
-                return Ok(cursor.read_i32::<LittleEndian>()? as isize);
-            } else if size == 8 {
-                return Ok(cursor.read_i64::<LittleEndian>()? as isize);
-            };
-        }
-        panic!("Invalid integer size: {}", size)
-    }
-    
-    // 从流中读取一个string
-    fn read_string(&mut self) -> Result<Vec<u8>> {
-        let (length, is_encoded) = self.read_length()?;
-        if is_encoded {
-            match length {
-                RDB_ENC_INT8 => {
-                    let int = self.read_i8()?;
-                    return Ok(int.to_string().into_bytes());
-                }
-                RDB_ENC_INT16 => {
-                    let int = self.read_integer(2, false)?;
-                    return Ok(int.to_string().into_bytes());
-                }
-                RDB_ENC_INT32 => {
-                    let int = self.read_integer(4, false)?;
-                    return Ok(int.to_string().into_bytes());
-                }
-                RDB_ENC_LZF => {
-                    let (compressed_len, _) = self.read_length()?;
-                    let (origin_len, _) = self.read_length()?;
-                    let mut compressed = vec![0; compressed_len as usize];
-                    self.read_exact(&mut compressed)?;
-                    let mut origin = vec![0; origin_len as usize];
-                    lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
-                    return Ok(origin);
-                }
-                _ => panic!("Invalid string length: {}", length)
-            };
-        };
-        let mut buff = vec![0; length as usize];
-        self.read_exact(&mut buff)?;
-        Ok(buff)
-    }
-    
-    // 从流中读取一个double
-    fn read_double(&mut self) -> Result<f64> {
-        let len = self.read_u8()?;
-        match len {
-            255 => {
-                return Ok(NEG_INFINITY);
-            }
-            254 => {
-                return Ok(INFINITY);
-            }
-            253 => {
-                return Ok(NAN);
-            }
-            _ => {
-                let mut buff = Vec::with_capacity(len as usize);
-                self.read_exact(&mut buff)?;
-                let score_str = to_string(buff);
-                let score = score_str.parse::<f64>().unwrap();
-                return Ok(score);
-            }
-        }
-    }
-    
-    // 根据传入的数据类型，从流中读取对应类型的数据
-    fn read_object(&mut self, value_type: u8,
-                   rdb_handlers: &mut dyn RdbHandler,
-                   meta: &Meta) -> Result<()> {
-        match value_type {
-            RDB_TYPE_STRING => {
-                let key = self.read_string()?;
-                let value = self.read_string()?;
-                rdb_handlers.handle(Object::String(KeyValue { key: &key, value: &value, meta }));
-            }
-            RDB_TYPE_LIST | RDB_TYPE_SET => {
-                let key = self.read_string()?;
-                let (count, _) = self.read_length()?;
-                let mut iter = StrValIter { count, input: Box::new(self) };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    if value_type == RDB_TYPE_LIST {
-                        rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
-                    } else {
-                        rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
-                    }
-                }
-            }
-            RDB_TYPE_ZSET => {
-                let key = self.read_string()?;
-                let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 1, input: Box::new(self) };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
-                }
-            }
-            RDB_TYPE_ZSET_2 => {
-                let key = self.read_string()?;
-                let (count, _) = self.read_length()?;
-                let mut iter = SortedSetIter { count, v: 2, input: Box::new(self) };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
-                }
-            }
-            RDB_TYPE_HASH => {
-                let key = self.read_string()?;
-                let (count, _) = self.read_length()?;
-                let mut iter = StrValIter { count: count * 2, input: Box::new(self) };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        let name;
-                        let value;
-                        if let Ok(next_val) = iter.next() {
-                            name = next_val;
-                            value = iter.next().expect("missing hash field value");
-                            val.push(Field { name, value });
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
-                }
-            }
-            RDB_TYPE_HASH_ZIPMAP => {
-                let key = self.read_string()?;
-                let bytes = self.read_string()?;
-                let cursor = &mut Cursor::new(&bytes);
-                cursor.set_position(1);
-                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        let name;
-                        let value;
-                        if let Ok(next_val) = iter.next() {
-                            name = next_val;
-                            value = iter.next().expect("missing hash field value");
-                            val.push(Field { name, value });
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
-                }
-            }
-            RDB_TYPE_LIST_ZIPLIST => {
-                let key = self.read_string()?;
-                let bytes = self.read_string()?;
-                let cursor = &mut Cursor::new(bytes);
-                // 跳过ZL_BYTES和ZL_TAIL
-                cursor.set_position(8);
-                let count = cursor.read_u16::<LittleEndian>()? as isize;
-                let mut iter = ZipListIter { count, cursor };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
-                }
-            }
-            RDB_TYPE_HASH_ZIPLIST => {
-                let key = self.read_string()?;
-                let bytes = self.read_string()?;
-                let cursor = &mut Cursor::new(bytes);
-                // 跳过ZL_BYTES和ZL_TAIL
-                cursor.set_position(8);
-                let count = cursor.read_u16::<LittleEndian>()? as isize;
-                let mut iter = ZipListIter { count, cursor };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        let name;
-                        let value;
-                        if let Ok(next_val) = iter.next() {
-                            name = next_val;
-                            value = iter.next().expect("missing hash field value");
-                            val.push(Field { name, value });
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
-                }
-            }
-            RDB_TYPE_ZSET_ZIPLIST => {
-                let key = self.read_string()?;
-                let bytes = self.read_string()?;
-                let cursor = &mut Cursor::new(bytes);
-                // 跳过ZL_BYTES和ZL_TAIL
-                cursor.set_position(8);
-                let count = cursor.read_u16::<LittleEndian>()? as isize;
-                let mut iter = ZipListIter { count, cursor };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        let member;
-                        let score: f64;
-                        if let Ok(next_val) = iter.next() {
-                            member = next_val;
-                            let score_str = to_string(iter.next()
-                                .expect("missing sorted set element's score"));
-                            score = score_str.parse::<f64>().unwrap();
-                            val.push(Item { member, score });
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
-                }
-            }
-            RDB_TYPE_SET_INTSET => {
-                let key = self.read_string()?;
-                let bytes = self.read_string()?;
-                let mut cursor = Cursor::new(&bytes);
-                let encoding = cursor.read_i32::<LittleEndian>()?;
-                let length = cursor.read_u32::<LittleEndian>()?;
-                let mut iter = IntSetIter { encoding, count: length as isize, cursor: &mut cursor };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
-                }
-            }
-            RDB_TYPE_LIST_QUICKLIST => {
-                let key = self.read_string()?;
-                let (count, _) = self.read_length()?;
-                let mut iter = QuickListIter { len: -1, count, input: Box::new(self), cursor: Option::None };
-                
-                let mut has_more = true;
-                while has_more {
-                    let mut val = Vec::new();
-                    for _ in 0..BATCH_SIZE {
-                        if let Ok(next_val) = iter.next() {
-                            val.push(next_val);
-                        } else {
-                            has_more = false;
-                            break;
-                        }
-                    }
-                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
-                }
-            }
-            RDB_TYPE_MODULE => {
-                // TODO
-            }
-            RDB_TYPE_MODULE_2 => {
-                // TODO
-            }
-            RDB_TYPE_STREAM_LISTPACKS => {
-                // TODO
-            }
-            _ => panic!("unknown data type: {}", value_type)
-        }
-        Ok(())
-    }
-}
-
-impl<R: Read + Sized> ReadResp for R {}
+use crate::io::Conn;
 
 // 读取、解析rdb
-pub(crate) fn parse(mut input: &mut dyn Read,
+pub(crate) fn parse(input: &mut Conn,
                     _: isize,
                     rdb_handlers: &mut dyn RdbHandler,
                     _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
@@ -467,16 +102,16 @@ pub(crate) fn parse(mut input: &mut dyn Read,
 }
 
 // 跳过rdb的字节
-pub(crate) fn skip(input: &mut dyn Read,
+pub(crate) fn skip(input: &mut Conn,
                    length: isize,
                    _: &mut dyn RdbHandler,
                    _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    std::io::copy(&mut input.take(length as u64), &mut std::io::sink())?;
+    std::io::copy(&mut input.input.as_mut().take(length as u64), &mut std::io::sink())?;
     Ok(Data::Empty)
 }
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut dyn Read, length: isize,
+pub(crate) fn read_bytes(input: &mut Conn, length: isize,
                          _: &mut dyn RdbHandler,
                          _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {
@@ -672,29 +307,29 @@ pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
 /// Special RDB opcodes
 ///
 // Module auxiliary data.
-const RDB_OPCODE_MODULE_AUX: u8 = 247;
+pub(crate) const RDB_OPCODE_MODULE_AUX: u8 = 247;
 // LRU idle time.
-const RDB_OPCODE_IDLE: u8 = 248;
+pub(crate) const RDB_OPCODE_IDLE: u8 = 248;
 // LFU frequency.
-const RDB_OPCODE_FREQ: u8 = 249;
+pub(crate) const RDB_OPCODE_FREQ: u8 = 249;
 // RDB aux field.
-const RDB_OPCODE_AUX: u8 = 250;
+pub(crate) const RDB_OPCODE_AUX: u8 = 250;
 // Hash table resize hint.
-const RDB_OPCODE_RESIZEDB: u8 = 251;
+pub(crate) const RDB_OPCODE_RESIZEDB: u8 = 251;
 // Expire time in milliseconds.
-const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
+pub(crate) const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
 // Old expire time in seconds.
-const RDB_OPCODE_EXPIRETIME: u8 = 253;
+pub(crate) const RDB_OPCODE_EXPIRETIME: u8 = 253;
 // DB number of the following keys.
-const RDB_OPCODE_SELECTDB: u8 = 254;
+pub(crate) const RDB_OPCODE_SELECTDB: u8 = 254;
 // End of the RDB file.
-const RDB_OPCODE_EOF: u8 = 255;
+pub(crate) const RDB_OPCODE_EOF: u8 = 255;
 
-const ZIP_INT_8BIT: u8 = 254;
-const ZIP_INT_16BIT: u8 = 192;
-const ZIP_INT_24BIT: u8 = 240;
-const ZIP_INT_32BIT: u8 = 208;
-const ZIP_INT_64BIT: u8 = 224;
+pub(crate) const ZIP_INT_8BIT: u8 = 254;
+pub(crate) const ZIP_INT_16BIT: u8 = 192;
+pub(crate) const ZIP_INT_24BIT: u8 = 240;
+pub(crate) const ZIP_INT_32BIT: u8 = 208;
+pub(crate) const ZIP_INT_64BIT: u8 = 224;
 
 /// Defines related to the dump file format. To store 32 bits lengths for short
 /// keys requires a lot of space, so we check the most significant 2 bits of
@@ -710,25 +345,25 @@ const ZIP_INT_64BIT: u8 = 224;
 ///
 /// Lengths up to 63 are stored using a single byte, most DB keys, and may
 /// values, will fit inside.
-const RDB_ENCVAL: u8 = 3;
-const RDB_6BITLEN: u8 = 0;
-const RDB_14BITLEN: u8 = 1;
-const RDB_32BITLEN: u8 = 0x80;
-const RDB_64BITLEN: u8 = 0x81;
+pub(crate) const RDB_ENCVAL: u8 = 3;
+pub(crate) const RDB_6BITLEN: u8 = 0;
+pub(crate) const RDB_14BITLEN: u8 = 1;
+pub(crate) const RDB_32BITLEN: u8 = 0x80;
+pub(crate) const RDB_64BITLEN: u8 = 0x81;
 
 /// When a length of a string object stored on disk has the first two bits
 /// set, the remaining six bits specify a special encoding for the object
 /// accordingly to the following defines:
 ///
 /// 8 bit signed integer
-const RDB_ENC_INT8: isize = 0;
+pub(crate) const RDB_ENC_INT8: isize = 0;
 /// 16 bit signed integer
-const RDB_ENC_INT16: isize = 1;
+pub(crate) const RDB_ENC_INT16: isize = 1;
 /// 32 bit signed integer
-const RDB_ENC_INT32: isize = 2;
+pub(crate) const RDB_ENC_INT32: isize = 2;
 /// string compressed with FASTLZ
-const RDB_ENC_LZF: isize = 3;
-const BATCH_SIZE: usize = 64;
+pub(crate) const RDB_ENC_LZF: isize = 3;
+pub(crate) const BATCH_SIZE: usize = 64;
 
 // 用于包装redis的返回值
 pub(crate) enum Data<B, V> {

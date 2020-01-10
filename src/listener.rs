@@ -7,16 +7,16 @@ pub mod standalone {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
-    use crate::{cmd, CommandHandler, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, resp, to_string};
+    use crate::{cmd, CommandHandler, io, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, to_string};
     use crate::config::Config;
+    use crate::io::{Conn, send};
     use crate::rdb::Data;
     use crate::rdb::Data::{Bytes, Empty};
-    use crate::resp::{Conn, send};
     
     // 用于监听单个Redis实例的事件
     pub struct Listener {
         config: Config,
-        conn: Option<Conn<TcpStream>>,
+        conn: Option<Conn>,
         rdb_listener: Box<dyn RdbHandler>,
         cmd_listener: Box<dyn CommandHandler>,
         t_heartbeat: HeartbeatWorker,
@@ -60,7 +60,7 @@ pub mod standalone {
             
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
             self.sender = Some(sender);
-            self.conn = Option::Some(resp::new(stream));
+            self.conn = Option::Some(io::new(stream));
             Ok(())
         }
         
@@ -73,14 +73,14 @@ pub mod standalone {
             Ok(())
         }
         
-        fn send_port(&mut self) -> Result<()> {
-            let conn = self.conn.as_mut().unwrap();
-            let port = conn.input.local_addr()?.port().to_string();
-            let port = port.as_bytes();
-            conn.send(b"REPLCONF", &[b"listening-port", port])?;
-            conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
-            Ok(())
-        }
+        //        fn send_port(&mut self) -> Result<()> {
+//            let conn = self.conn.as_mut().unwrap();
+//            let port = conn.input.local_addr()?.port().to_string();
+//            let port = port.as_bytes();
+//            conn.send(b"REPLCONF", &[b"listening-port", port])?;
+//            conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+//            Ok(())
+//        }
         
         pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
             self.rdb_listener = listener
@@ -149,9 +149,12 @@ pub mod standalone {
         }
         
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-            // TODO 获取到读取了多少个字节
             let conn = self.conn.as_mut().unwrap();
+            conn.mark();
             let cmd = conn.reply(rdb::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
+            let read_len = conn.unmark()?;
+            self.config.repl_offset += read_len;
+            self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
             return cmd;
         }
     }
@@ -160,7 +163,7 @@ pub mod standalone {
         fn open(&mut self) -> Result<()> {
             self.connect()?;
             self.auth()?;
-            self.send_port()?;
+//            self.send_port()?;
             while !self.start_sync()? {
                 sleep(Duration::from_secs(5));
             }
