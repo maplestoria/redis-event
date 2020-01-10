@@ -402,24 +402,20 @@ impl Conn {
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
-                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
+                let mut iter = ZipMapIter { has_more: true, cursor };
                 
                 let mut has_more = true;
                 while has_more {
-                    let mut val = Vec::new();
+                    let mut fields = Vec::new();
                     for _ in 0..BATCH_SIZE {
-                        let name;
-                        let value;
-                        if let Ok(next_val) = iter.next() {
-                            name = next_val;
-                            value = iter.next().expect("missing hash field value");
-                            val.push(Field { name, value });
+                        if let Ok(field) = iter.next() {
+                            fields.push(field);
                         } else {
                             has_more = false;
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &fields, meta }));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {

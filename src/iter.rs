@@ -4,7 +4,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::io::Conn;
-use crate::rdb::{Item, read_zip_list_entry, read_zm_len};
+use crate::rdb::{Field, Item, read_zip_list_entry, read_zm_len};
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -123,36 +123,31 @@ impl SortedSetIter<'_> {
 // HashZipMap的值迭代器
 pub(crate) struct ZipMapIter<'a> {
     pub(crate) has_more: bool,
-    pub(crate) read_val: bool,
     pub(crate) cursor: &'a mut Cursor<&'a Vec<u8>>,
 }
 
-impl Iter for ZipMapIter<'_> {
-    fn next(&mut self) -> io::Result<Vec<u8>> {
+impl ZipMapIter<'_> {
+    pub(crate) fn next(&mut self) -> io::Result<Field> {
         if !self.has_more {
             return Err(Error::new(ErrorKind::NotFound, "No element left"));
         }
-        if self.read_val {
-            let zm_len = read_zm_len(self.cursor)?;
-            if zm_len == 255 {
-                self.has_more = false;
-                return Ok(Vec::new());
-            }
-            let free = self.cursor.read_i8()?;
-            let mut value = vec![0; zm_len];
-            self.cursor.read_exact(&mut value)?;
-            self.cursor.set_position(self.cursor.position() + free as u64);
-            return Ok(value);
-        } else {
-            let zm_len = read_zm_len(self.cursor)?;
-            if zm_len == 255 {
-                self.has_more = false;
-                return Err(Error::new(ErrorKind::NotFound, "No element left"));
-            }
-            let mut field = vec![0; zm_len];
-            self.cursor.read_exact(&mut field)?;
-            return Ok(field);
+        let zm_len = read_zm_len(self.cursor)?;
+        if zm_len == 255 {
+            self.has_more = false;
+            return Err(Error::new(ErrorKind::NotFound, "No element left"));
         }
+        let mut field = vec![0; zm_len];
+        self.cursor.read_exact(&mut field)?;
+        let zm_len = read_zm_len(self.cursor)?;
+        if zm_len == 255 {
+            self.has_more = false;
+            return Ok(Field { name: field, value: Vec::new() });
+        };
+        let free = self.cursor.read_i8()?;
+        let mut val = vec![0; zm_len];
+        self.cursor.read_exact(&mut val)?;
+        self.cursor.set_position(self.cursor.position() + free as u64);
+        return Ok(Field { name: field, value: val });
     }
 }
 
