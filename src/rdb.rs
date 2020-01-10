@@ -7,10 +7,10 @@ use crate::io::Conn;
 use crate::rdb::Data::Empty;
 
 // 读取、解析rdb
-pub fn parse(input: &mut Conn,
-             _: isize,
-             rdb_handlers: &mut dyn RdbHandler,
-             _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+pub(crate) fn parse(input: &mut Conn,
+                    _: isize,
+                    rdb_handlers: &mut dyn RdbHandler,
+                    _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     rdb_handlers.handle(Object::BOR);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -333,7 +333,7 @@ pub(crate) const RDB_ENC_LZF: isize = 3;
 pub(crate) const BATCH_SIZE: usize = 64;
 
 // 用于包装redis的返回值
-pub enum Data<B, V> {
+pub(crate) enum Data<B, V> {
     // 包装Vec<u8>
     Bytes(B),
     // 包装Vec<Vec<u8>>

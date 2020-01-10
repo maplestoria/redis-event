@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
 use std::net::{IpAddr, SocketAddr};
 use std::process::Command;
 use std::str::FromStr;
@@ -8,7 +7,7 @@ use std::time::Duration;
 
 use serial_test::serial;
 
-use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener, rdb, io};
+use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener};
 use redis_event::config::Config;
 use redis_event::listener::standalone;
 use redis_event::rdb::{ExpireType, Object};
@@ -477,106 +476,6 @@ fn test_ziplist() {
         }
     }
     start_redis_test("ziplist_that_compresses_easily.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
-}
-
-#[test]
-fn test_zipmap_not_compress_file() {
-    let file = File::open("tests/rdb/zipmap_that_doesnt_compress.rdb").expect("file not found");
-    let mut file = io::from_file(file);
-    
-    struct TestRdbHandler {
-        map: HashMap<String, String>
-    }
-    
-    impl RdbHandler for TestRdbHandler {
-        fn handle(&mut self, data: Object) {
-            match data {
-                Object::Hash(hash) => {
-                    assert_eq!("zimap_doesnt_compress", String::from_utf8_lossy(hash.key));
-                    for field in hash.fields {
-                        let name = String::from_utf8_lossy(&field.name).to_string();
-                        let val = String::from_utf8_lossy(&field.value).to_string();
-                        self.map.insert(name, val);
-                    }
-                }
-                Object::EOR => {
-                    assert_eq!("2", self.map.get("MKD1G6").expect("field not found"));
-                    assert_eq!("F7TI", self.map.get("YNNXK").expect("field not found"));
-                }
-                _ => {}
-            }
-        }
-    }
-    
-    rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
-        .unwrap();
-}
-
-#[test]
-fn test_zipmap_compress_file() {
-    let file = File::open("tests/rdb/zipmap_that_compresses_easily.rdb").expect("file not found");
-    let mut file = io::from_file(file);
-    
-    struct TestRdbHandler {
-        map: HashMap<String, String>
-    }
-    
-    impl RdbHandler for TestRdbHandler {
-        fn handle(&mut self, data: Object) {
-            match data {
-                Object::Hash(hash) => {
-                    assert_eq!("zipmap_compresses_easily", String::from_utf8_lossy(hash.key));
-                    for field in hash.fields {
-                        let name = String::from_utf8_lossy(&field.name).to_string();
-                        let val = String::from_utf8_lossy(&field.value).to_string();
-                        self.map.insert(name, val);
-                    }
-                }
-                Object::EOR => {
-                    assert_eq!("aa", self.map.get("a").expect("field not found"));
-                    assert_eq!("aaaa", self.map.get("aa").expect("field not found"));
-                    assert_eq!("aaaaaaaaaaaaaa", self.map.get("aaaaa").expect("field not found"));
-                }
-                _ => {}
-            }
-        }
-    }
-    
-    rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
-        .unwrap();
-}
-
-#[test]
-fn test_regular_sorted_set_file() {
-    let file = File::open("tests/rdb/regular_sorted_set.rdb").expect("file not found");
-    let mut file = io::from_file(file);
-    
-    struct TestRdbHandler {
-        map: HashMap<String, f64>
-    }
-    
-    impl RdbHandler for TestRdbHandler {
-        fn handle(&mut self, data: Object) {
-            match data {
-                Object::SortedSet(set) => {
-                    let key = String::from_utf8_lossy(set.key).to_string();
-                    assert_eq!("force_sorted_set", key);
-                    for item in set.items {
-                        self.map.insert(String::from_utf8_lossy(&item.member).to_string(), item.score);
-                    }
-                }
-                Object::EOR => {
-                    assert_eq!(500, self.map.len());
-                    assert_eq!(3.19, self.map.get("G72TWVWH0DY782VG0H8VVAR8RNO7BS9QGOHTZFJU67X7L0Z3PR").unwrap().clone());
-                    assert_eq!(0.76, self.map.get("N8HKPIK4RC4I2CXVV90LQCWODW1DZYD0DA26R8V5QP7UR511M8").unwrap().clone());
-                }
-                _ => {}
-            }
-        }
-    }
-    
-    rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
-        .unwrap();
 }
 
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
