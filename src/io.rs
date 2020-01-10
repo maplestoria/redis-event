@@ -1,92 +1,149 @@
+/*!
+ 处理redis的响应数据
+*/
+
+use std::any::Any;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
-use std::io::{Cursor, Read, Result};
+use std::fs::File;
+use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::{lzf, RdbHandler, to_string};
+use crate::{CommandHandler, io, lzf, RdbHandler, to_string};
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::*;
-use crate::rdb::KeyValue;
+use crate::rdb::Data::{Bytes, BytesVec, Empty};
 
-/// Defines related to the dump file format. To store 32 bits lengths for short
-/// keys requires a lot of space, so we check the most significant 2 bits of
-/// the first byte to interpreter the length:
-///
-/// 00|XXXXXX => if the two MSB are 00 the len is the 6 bits of this byte
-/// 01|XXXXXX XXXXXXXX =>  01, the len is 14 byes, 6 bits + 8 bits of next byte
-/// 10|000000 [32 bit integer] => A full 32 bit len in net byte order will follow
-/// 10|000001 [64 bit integer] => A full 64 bit len in net byte order will follow
-/// 11|OBKIND this means: specially encoded object will follow. The six bits
-///           number specify the kind of object that follows.
-///           See the RDB_ENC_* defines.
-///
-/// Lengths up to 63 are stored using a single byte, most DB keys, and may
-/// values, will fit inside.
-const RDB_ENCVAL: u8 = 3;
-const RDB_6BITLEN: u8 = 0;
-const RDB_14BITLEN: u8 = 1;
-const RDB_32BITLEN: u8 = 0x80;
-const RDB_64BITLEN: u8 = 0x81;
+pub(crate) trait ReadWrite: Read + Write {
+    fn as_any(&self) -> &dyn Any;
+}
 
-/// When a length of a string object stored on disk has the first two bits
-/// set, the remaining six bits specify a special encoding for the object
-/// accordingly to the following defines:
-///
-/// 8 bit signed integer
-const RDB_ENC_INT8: isize = 0;
-/// 16 bit signed integer
-const RDB_ENC_INT16: isize = 1;
-/// 32 bit signed integer
-const RDB_ENC_INT32: isize = 2;
-/// string compressed with FASTLZ
-const RDB_ENC_LZF: isize = 3;
-const BATCH_SIZE: usize = 64;
+impl ReadWrite for TcpStream {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl ReadWrite for File {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 pub(crate) struct Conn {
-    pub(crate) stream: Box<TcpStream>,
+    pub(crate) input: Box<dyn ReadWrite>,
     len: i64,
     marked: bool,
 }
 
+pub(crate) fn from_file(file: File) -> Conn {
+    Conn { input: Box::new(file), len: 0, marked: false }
+}
+
+pub(crate) fn new(input: TcpStream) -> Conn {
+    Conn { input: Box::new(input), len: 0, marked: false }
+}
+
 impl Conn {
-    pub(crate) fn new(stream: Box<TcpStream>) -> Conn {
-        Conn { stream, len: 0, marked: false }
+    pub(crate) fn reply(&mut self,
+                        func: fn(input: &mut Conn, isize,
+                                 &mut dyn RdbHandler,
+                                 &mut dyn CommandHandler,
+                        ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
+                        rdb_handler: &mut dyn RdbHandler,
+                        cmd_handler: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+        loop {
+            let response_type = self.read_u8()?;
+            match response_type {
+                // Plus: Simple String
+                // Minus: Error
+                // Colon: Integer
+                PLUS | MINUS | COLON => {
+                    let mut bytes = vec![];
+                    loop {
+                        let byte = self.read_u8()?;
+                        if byte != CR {
+                            bytes.push(byte);
+                        } else {
+                            break;
+                        }
+                    }
+                    let byte = self.read_u8()?;
+                    if byte == LF {
+                        if response_type == PLUS || response_type == COLON {
+                            return Ok(Bytes(bytes));
+                        } else {
+                            let message = to_string(bytes);
+                            return Err(Error::new(ErrorKind::InvalidInput, message));
+                        }
+                    } else {
+                        panic!("Expect LF after CR");
+                    }
+                }
+                DOLLAR => { // Bulk String
+                    let mut bytes = vec![];
+                    loop {
+                        let byte = self.read_u8()?;
+                        if byte != CR {
+                            bytes.push(byte);
+                        } else {
+                            break;
+                        }
+                    }
+                    let byte = self.read_u8()?;
+                    if byte == LF {
+                        let length = to_string(bytes);
+                        let length = length.parse::<isize>().unwrap();
+                        return func(self, length, rdb_handler, cmd_handler);
+                    } else {
+                        panic!("Expect LF after CR");
+                    }
+                }
+                STAR => { // Array
+                    let mut bytes = vec![];
+                    loop {
+                        let byte = self.read_u8()?;
+                        if byte != CR {
+                            bytes.push(byte);
+                        } else {
+                            break;
+                        }
+                    }
+                    let byte = self.read_u8()?;
+                    if byte == LF {
+                        let length = to_string(bytes);
+                        let length = length.parse::<isize>().unwrap();
+                        if length <= 0 {
+                            return Ok(Empty);
+                        } else {
+                            let mut result = Vec::with_capacity(length as usize);
+                            for _ in 0..length {
+                                match self.reply(io::read_bytes, rdb_handler, cmd_handler)? {
+                                    Bytes(resp) => {
+                                        result.push(resp);
+                                    }
+                                    BytesVec(mut resp) => {
+                                        result.append(&mut resp);
+                                    }
+                                    Empty => panic!("Expect Redis response, but got empty")
+                                }
+                            }
+                            return Ok(BytesVec(result));
+                        }
+                    } else {
+                        panic!("Expect LF after CR");
+                    }
+                }
+                LF => {
+                    // 无需处理
+                }
+                _ => {
+                    panic!("错误的响应类型: {}", response_type);
+                }
+            }
+        }
     }
-    
-    pub(crate) fn read_u8(&mut self) -> Result<u8> {
-        let mut buf = [0; 1];
-        self.stream.read_exact(&mut buf)?;
-        if self.marked {
-            self.len += 1;
-        };
-        Ok(buf[0])
-    }
-    
-    pub(crate) fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
-        self.stream.read_exact(buf)?;
-        if self.marked {
-            self.len += buf.len() as i64;
-        };
-        Ok(())
-    }
-    
-    pub(crate) fn read_u64<T: ByteOrder>(&mut self) -> Result<u64> {
-        let int = self.stream.read_u64::<T>()?;
-        if self.marked {
-            self.len += 8;
-        };
-        Ok(int)
-    }
-    
-    pub(crate) fn read_i8(&mut self) -> Result<i8> {
-        let int = self.stream.read_i8()?;
-        if self.marked {
-            self.len += 1;
-        };
-        Ok(int)
-    }
-    
     pub(crate) fn mark(&mut self) {
         self.marked = true;
     }
@@ -98,7 +155,45 @@ impl Conn {
             self.marked = false;
             return Ok(len);
         }
-        panic!("Reader not marked");
+        return Err(Error::new(ErrorKind::Other, "not marked"));
+    }
+    
+    pub(crate) fn read_u8(&mut self) -> Result<u8> {
+        let mut buf = [0; 1];
+        self.input.read_exact(&mut buf)?;
+        if self.marked {
+            self.len += 1;
+        };
+        Ok(buf[0])
+    }
+    
+    pub(crate) fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
+        self.input.read_exact(buf)?;
+        if self.marked {
+            self.len += buf.len() as i64;
+        };
+        Ok(())
+    }
+    
+    pub(crate) fn read_u64<O: ByteOrder>(&mut self) -> Result<u64> {
+        let int = self.input.read_u64::<O>()?;
+        if self.marked {
+            self.len += 8;
+        };
+        Ok(int)
+    }
+    
+    pub(crate) fn read_i8(&mut self) -> Result<i8> {
+        let int = self.input.read_i8()?;
+        if self.marked {
+            self.len += 1;
+        };
+        Ok(int)
+    }
+    
+    pub(crate) fn send(&mut self, command: &[u8], args: &[&[u8]]) -> Result<()> {
+        send(&mut self.input, command, args)?;
+        Ok(())
     }
     
     // 读取redis响应中下一条数据的长度
@@ -199,7 +294,7 @@ impl Conn {
                 return Ok(NAN);
             }
             _ => {
-                let mut buff = Vec::with_capacity(len as usize);
+                let mut buff = vec![0; len as usize];
                 self.read_exact(&mut buff)?;
                 let score_str = to_string(buff);
                 let score = score_str.parse::<f64>().unwrap();
@@ -209,9 +304,8 @@ impl Conn {
     }
     
     // 根据传入的数据类型，从流中读取对应类型的数据
-    pub(crate) fn read_object(&mut self,
-                              value_type: u8,
-                              rdb_handlers: &mut Box<dyn RdbHandler>,
+    pub(crate) fn read_object(&mut self, value_type: u8,
+                              rdb_handlers: &mut dyn RdbHandler,
                               meta: &Meta) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
@@ -308,24 +402,20 @@ impl Conn {
                 let bytes = self.read_string()?;
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
-                let mut iter = ZipMapIter { has_more: true, read_val: false, cursor };
+                let mut iter = ZipMapIter { has_more: true, cursor };
                 
                 let mut has_more = true;
                 while has_more {
-                    let mut val = Vec::new();
+                    let mut fields = Vec::new();
                     for _ in 0..BATCH_SIZE {
-                        let name;
-                        let value;
-                        if let Ok(next_val) = iter.next() {
-                            name = next_val;
-                            value = iter.next().expect("missing hash field value");
-                            val.push(Field { name, value });
+                        if let Ok(field) = iter.next() {
+                            fields.push(field);
                         } else {
                             has_more = false;
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &fields, meta }));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
@@ -462,3 +552,70 @@ impl Conn {
         Ok(())
     }
 }
+
+pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> Result<()> {
+    let mut writer = BufWriter::new(output);
+    writer.write(&[STAR])?;
+    let args_len = args.len() + 1;
+    writer.write(&args_len.to_string().into_bytes())?;
+    writer.write(&[CR, LF, DOLLAR])?;
+    writer.write(&command.len().to_string().into_bytes())?;
+    writer.write(&[CR, LF])?;
+    writer.write(command)?;
+    writer.write(&[CR, LF])?;
+    for arg in args {
+        writer.write(&[DOLLAR])?;
+        writer.write(&arg.len().to_string().into_bytes())?;
+        writer.write(&[CR, LF])?;
+        writer.write(arg)?;
+        writer.write(&[CR, LF])?;
+    }
+    writer.flush()
+}
+
+// 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
+pub(crate) fn read_bytes(input: &mut Conn, length: isize,
+                         _: &mut dyn RdbHandler,
+                         _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    if length > 0 {
+        let mut bytes = vec![0; length as usize];
+        input.read_exact(&mut bytes)?;
+        let end = &mut [0; 2];
+        input.read_exact(end)?;
+        if end == b"\r\n" {
+            return Ok(Bytes(bytes));
+        } else {
+            panic!("Expect CRLF after bulk string, but got: {:?}", end);
+        }
+    } else if length == 0 {
+        // length == 0 代表空字符，后面还有CRLF
+        input.read_exact(&mut [0; 2])?;
+        return Ok(Empty);
+    } else {
+        // length < 0 代表null
+        return Ok(Empty);
+    }
+}
+
+// 跳过rdb的字节
+pub(crate) fn skip(input: &mut Conn,
+                   length: isize,
+                   _: &mut dyn RdbHandler,
+                   _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    std::io::copy(&mut input.input.as_mut().take(length as u64), &mut std::io::sink())?;
+    Ok(Data::Empty)
+}
+
+// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
+pub(crate) const CR: u8 = b'\r';
+pub(crate) const LF: u8 = b'\n';
+// 代表array响应
+pub(crate) const STAR: u8 = b'*';
+// 代表bulk string响应
+pub(crate) const DOLLAR: u8 = b'$';
+// 代表simple string响应
+pub(crate) const PLUS: u8 = b'+';
+// 代表error响应
+pub(crate) const MINUS: u8 = b'-';
+// 代表integer响应
+pub(crate) const COLON: u8 = b':';

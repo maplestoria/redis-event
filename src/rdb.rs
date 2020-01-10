@@ -3,90 +3,14 @@ use std::io::{Cursor, Read, Result};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
 use crate::{CommandHandler, RdbHandler, to_string};
-use crate::conn::Conn;
-use crate::rdb::Data::{Bytes, Empty};
-
-// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
-pub(crate) const CR: u8 = b'\r';
-pub(crate) const LF: u8 = b'\n';
-// 代表array响应
-pub(crate) const STAR: u8 = b'*';
-// 代表bulk string响应
-pub(crate) const DOLLAR: u8 = b'$';
-// 代表simple string响应
-pub(crate) const PLUS: u8 = b'+';
-// 代表error响应
-pub(crate) const MINUS: u8 = b'-';
-// 代表integer响应
-pub(crate) const COLON: u8 = b':';
-
-/// Map object types to RDB object types.
-///
-pub(crate) const RDB_TYPE_STRING: u8 = 0;
-pub(crate) const RDB_TYPE_LIST: u8 = 1;
-pub(crate) const RDB_TYPE_SET: u8 = 2;
-pub(crate) const RDB_TYPE_ZSET: u8 = 3;
-pub(crate) const RDB_TYPE_HASH: u8 = 4;
-/// ZSET version 2 with doubles stored in binary.
-pub(crate) const RDB_TYPE_ZSET_2: u8 = 5;
-pub(crate) const RDB_TYPE_MODULE: u8 = 6;
-/// Module value with annotations for parsing without
-/// the generating module being loaded.
-pub(crate) const RDB_TYPE_MODULE_2: u8 = 7;
-
-/// Object types for encoded objects.
-///
-pub(crate) const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
-pub(crate) const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
-pub(crate) const RDB_TYPE_SET_INTSET: u8 = 11;
-pub(crate) const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
-pub(crate) const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
-pub(crate) const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
-pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
-
-/// Special RDB opcodes
-///
-// Module auxiliary data.
-const RDB_OPCODE_MODULE_AUX: u8 = 247;
-// LRU idle time.
-const RDB_OPCODE_IDLE: u8 = 248;
-// LFU frequency.
-const RDB_OPCODE_FREQ: u8 = 249;
-// RDB aux field.
-const RDB_OPCODE_AUX: u8 = 250;
-// Hash table resize hint.
-const RDB_OPCODE_RESIZEDB: u8 = 251;
-// Expire time in milliseconds.
-const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
-// Old expire time in seconds.
-const RDB_OPCODE_EXPIRETIME: u8 = 253;
-// DB number of the following keys.
-const RDB_OPCODE_SELECTDB: u8 = 254;
-// End of the RDB file.
-const RDB_OPCODE_EOF: u8 = 255;
-
-const ZIP_INT_8BIT: u8 = 254;
-const ZIP_INT_16BIT: u8 = 192;
-const ZIP_INT_24BIT: u8 = 240;
-const ZIP_INT_32BIT: u8 = 208;
-const ZIP_INT_64BIT: u8 = 224;
-
-// 用于包装redis的返回值
-pub(crate) enum Data<B, V> {
-    // 包装Vec<u8>
-    Bytes(B),
-    // 包装Vec<Vec<u8>>
-    BytesVec(V),
-    // 空返回
-    Empty,
-}
+use crate::io::Conn;
+use crate::rdb::Data::Empty;
 
 // 读取、解析rdb
 pub(crate) fn parse(input: &mut Conn,
-                    length: isize,
-                    rdb_handlers: &mut Box<dyn RdbHandler>,
-                    _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    println!("rdb size: {} bytes", length);
+                    _: isize,
+                    rdb_handlers: &mut dyn RdbHandler,
+                    _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     rdb_handlers.handle(Object::BOR);
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -175,40 +99,6 @@ pub(crate) fn parse(input: &mut Conn,
     };
     rdb_handlers.handle(Object::EOR);
     Ok(Empty)
-}
-
-// 跳过rdb的字节
-pub(crate) fn skip(input: &mut Conn,
-                   length: isize,
-                   _: &mut Box<dyn RdbHandler>,
-                   _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    let stream = input.stream.as_ref();
-    std::io::copy(&mut stream.take(length as u64), &mut std::io::sink())?;
-    Ok(Data::Empty)
-}
-
-// 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
-pub(crate) fn read_bytes(input: &mut Conn, length: isize,
-                         _: &mut Box<dyn RdbHandler>,
-                         _: &mut Box<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    if length > 0 {
-        let mut bytes = vec![0; length as usize];
-        input.read_exact(&mut bytes)?;
-        let end = &mut [0; 2];
-        input.read_exact(end)?;
-        if end == b"\r\n" {
-            return Ok(Bytes(bytes));
-        } else {
-            panic!("Expect CRLF after bulk string, but got: {:?}", end);
-        }
-    } else if length == 0 {
-        // length == 0 代表空字符，后面还有CRLF
-        input.read_exact(&mut [0; 2])?;
-        return Ok(Empty);
-    } else {
-        // length < 0 代表null
-        return Ok(Empty);
-    }
 }
 
 pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize> {
@@ -355,4 +245,99 @@ pub struct Hash<'a> {
 pub struct Field {
     pub name: Vec<u8>,
     pub value: Vec<u8>,
+}
+
+/// Map object types to RDB object types.
+///
+pub(crate) const RDB_TYPE_STRING: u8 = 0;
+pub(crate) const RDB_TYPE_LIST: u8 = 1;
+pub(crate) const RDB_TYPE_SET: u8 = 2;
+pub(crate) const RDB_TYPE_ZSET: u8 = 3;
+pub(crate) const RDB_TYPE_HASH: u8 = 4;
+/// ZSET version 2 with doubles stored in binary.
+pub(crate) const RDB_TYPE_ZSET_2: u8 = 5;
+pub(crate) const RDB_TYPE_MODULE: u8 = 6;
+/// Module value with annotations for parsing without
+/// the generating module being loaded.
+pub(crate) const RDB_TYPE_MODULE_2: u8 = 7;
+
+/// Object types for encoded objects.
+///
+pub(crate) const RDB_TYPE_HASH_ZIPMAP: u8 = 9;
+pub(crate) const RDB_TYPE_LIST_ZIPLIST: u8 = 10;
+pub(crate) const RDB_TYPE_SET_INTSET: u8 = 11;
+pub(crate) const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
+pub(crate) const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
+pub(crate) const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
+pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
+
+/// Special RDB opcodes
+///
+// Module auxiliary data.
+pub(crate) const RDB_OPCODE_MODULE_AUX: u8 = 247;
+// LRU idle time.
+pub(crate) const RDB_OPCODE_IDLE: u8 = 248;
+// LFU frequency.
+pub(crate) const RDB_OPCODE_FREQ: u8 = 249;
+// RDB aux field.
+pub(crate) const RDB_OPCODE_AUX: u8 = 250;
+// Hash table resize hint.
+pub(crate) const RDB_OPCODE_RESIZEDB: u8 = 251;
+// Expire time in milliseconds.
+pub(crate) const RDB_OPCODE_EXPIRETIME_MS: u8 = 252;
+// Old expire time in seconds.
+pub(crate) const RDB_OPCODE_EXPIRETIME: u8 = 253;
+// DB number of the following keys.
+pub(crate) const RDB_OPCODE_SELECTDB: u8 = 254;
+// End of the RDB file.
+pub(crate) const RDB_OPCODE_EOF: u8 = 255;
+
+pub(crate) const ZIP_INT_8BIT: u8 = 254;
+pub(crate) const ZIP_INT_16BIT: u8 = 192;
+pub(crate) const ZIP_INT_24BIT: u8 = 240;
+pub(crate) const ZIP_INT_32BIT: u8 = 208;
+pub(crate) const ZIP_INT_64BIT: u8 = 224;
+
+/// Defines related to the dump file format. To store 32 bits lengths for short
+/// keys requires a lot of space, so we check the most significant 2 bits of
+/// the first byte to interpreter the length:
+///
+/// 00|XXXXXX => if the two MSB are 00 the len is the 6 bits of this byte
+/// 01|XXXXXX XXXXXXXX =>  01, the len is 14 byes, 6 bits + 8 bits of next byte
+/// 10|000000 [32 bit integer] => A full 32 bit len in net byte order will follow
+/// 10|000001 [64 bit integer] => A full 64 bit len in net byte order will follow
+/// 11|OBKIND this means: specially encoded object will follow. The six bits
+///           number specify the kind of object that follows.
+///           See the RDB_ENC_* defines.
+///
+/// Lengths up to 63 are stored using a single byte, most DB keys, and may
+/// values, will fit inside.
+pub(crate) const RDB_ENCVAL: u8 = 3;
+pub(crate) const RDB_6BITLEN: u8 = 0;
+pub(crate) const RDB_14BITLEN: u8 = 1;
+pub(crate) const RDB_32BITLEN: u8 = 0x80;
+pub(crate) const RDB_64BITLEN: u8 = 0x81;
+
+/// When a length of a string object stored on disk has the first two bits
+/// set, the remaining six bits specify a special encoding for the object
+/// accordingly to the following defines:
+///
+/// 8 bit signed integer
+pub(crate) const RDB_ENC_INT8: isize = 0;
+/// 16 bit signed integer
+pub(crate) const RDB_ENC_INT16: isize = 1;
+/// 32 bit signed integer
+pub(crate) const RDB_ENC_INT32: isize = 2;
+/// string compressed with FASTLZ
+pub(crate) const RDB_ENC_LZF: isize = 3;
+pub(crate) const BATCH_SIZE: usize = 64;
+
+// 用于包装redis的返回值
+pub(crate) enum Data<B, V> {
+    // 包装Vec<u8>
+    Bytes(B),
+    // 包装Vec<Vec<u8>>
+    BytesVec(V),
+    // 空返回
+    Empty,
 }

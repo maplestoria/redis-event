@@ -1,5 +1,5 @@
 pub mod standalone {
-    use std::io::{BufWriter, Error, ErrorKind, Result, Write};
+    use std::io::Result;
     use std::net::TcpStream;
     use std::result::Result::Ok;
     use std::sync::mpsc;
@@ -7,11 +7,12 @@ pub mod standalone {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
-    use crate::{cmd, CommandHandler, rdb, RdbHandler, RedisListener, to_string, NoOpRdbHandler, NoOpCommandHandler};
+    use crate::{cmd, CommandHandler, io, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, to_string};
     use crate::config::Config;
-    use crate::conn::Conn;
-    use crate::rdb::{COLON, CR, Data, DOLLAR, LF, MINUS, PLUS, STAR};
-    use crate::rdb::Data::{Bytes, BytesVec, Empty};
+    use crate::io::{Conn, send};
+    use crate::rdb::Data;
+    use crate::rdb::Data::{Bytes, Empty};
+    use std::borrow::Borrow;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener {
@@ -27,13 +28,13 @@ pub mod standalone {
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
             println!("connected to server!");
-            let stream_boxed = Box::new(stream.try_clone());
-            let stream = Box::new(stream);
+            let mut stream_boxed = stream.try_clone();
+            let stream = stream;
             let (sender, receiver) = mpsc::channel();
             
             let t = thread::spawn(move || {
                 let mut offset = 0;
-                let output = stream_boxed.as_ref().as_ref().unwrap();
+                let output = stream_boxed.as_mut().unwrap();
                 let mut timer = Instant::now();
                 let half_sec = Duration::from_millis(500);
                 loop {
@@ -60,130 +61,30 @@ pub mod standalone {
             
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
             self.sender = Some(sender);
-            self.conn = Option::Some(Conn::new(stream));
+            self.conn = Option::Some(io::new(stream));
             Ok(())
         }
         
         fn auth(&mut self) -> Result<()> {
             if !self.config.password.is_empty() {
-                let conn = self.conn.as_ref().unwrap();
-                let conn = conn.stream.as_ref();
-                send(conn, b"AUTH", &[self.config.password.as_bytes()])?;
-                self.response(rdb::read_bytes)?;
+                let conn = self.conn.as_mut().unwrap();
+                conn.send(b"AUTH", &[self.config.password.as_bytes()])?;
+                conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
             }
             Ok(())
         }
         
         fn send_port(&mut self) -> Result<()> {
-            let conn = self.conn.as_ref().unwrap();
-            let port = conn.stream.local_addr()?.port().to_string();
+            let conn = self.conn.as_mut().unwrap();
+            let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
+                Some(stream) => stream,
+                None => panic!("not tcp stream")
+            };
+            let port = stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
-            
-            let conn = self.conn.as_ref().unwrap();
-            let conn = conn.stream.as_ref();
-            
-            send(conn, b"REPLCONF", &[b"listening-port", port])?;
-            self.response(rdb::read_bytes)?;
+            conn.send(b"REPLCONF", &[b"listening-port", port])?;
+            conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
             Ok(())
-        }
-        
-        fn response(&mut self,
-                    func: fn(&mut Conn, isize,
-                             &mut Box<dyn RdbHandler>, &mut Box<dyn CommandHandler>,
-                    ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
-        ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-            loop {
-                let conn = self.conn.as_mut().unwrap();
-                let response_type = conn.read_u8()?;
-                match response_type {
-                    // Plus: Simple String
-                    // Minus: Error
-                    // Colon: Integer
-                    PLUS | MINUS | COLON => {
-                        let mut bytes = vec![];
-                        loop {
-                            let byte = conn.read_u8()?;
-                            if byte != CR {
-                                bytes.push(byte);
-                            } else {
-                                break;
-                            }
-                        }
-                        let byte = conn.read_u8()?;
-                        if byte == LF {
-                            if response_type == PLUS || response_type == COLON {
-                                return Ok(Bytes(bytes));
-                            } else {
-                                let message = to_string(bytes);
-                                return Err(Error::new(ErrorKind::InvalidInput, message));
-                            }
-                        } else {
-                            panic!("Expect LF after CR");
-                        }
-                    }
-                    DOLLAR => { // Bulk String
-                        let mut bytes = vec![];
-                        loop {
-                            let byte = conn.read_u8()?;
-                            if byte != CR {
-                                bytes.push(byte);
-                            } else {
-                                break;
-                            }
-                        }
-                        let byte = conn.read_u8()?;
-                        if byte == LF {
-                            let length = to_string(bytes);
-                            let length = length.parse::<isize>().unwrap();
-                            let stream = self.conn.as_mut().unwrap();
-                            return func(stream, length, &mut self.rdb_listener, &mut self.cmd_listener);
-                        } else {
-                            panic!("Expect LF after CR");
-                        }
-                    }
-                    STAR => { // Array
-                        let mut bytes = vec![];
-                        loop {
-                            let byte = conn.read_u8()?;
-                            if byte != CR {
-                                bytes.push(byte);
-                            } else {
-                                break;
-                            }
-                        }
-                        let byte = conn.read_u8()?;
-                        if byte == LF {
-                            let length = to_string(bytes);
-                            let length = length.parse::<isize>().unwrap();
-                            if length <= 0 {
-                                return Ok(Empty);
-                            } else {
-                                let mut result = Vec::with_capacity(length as usize);
-                                for _ in 0..length {
-                                    match self.response(rdb::read_bytes)? {
-                                        Bytes(resp) => {
-                                            result.push(resp);
-                                        }
-                                        BytesVec(mut resp) => {
-                                            result.append(&mut resp);
-                                        }
-                                        Empty => panic!("Expect Redis response, but got empty")
-                                    }
-                                }
-                                return Ok(BytesVec(result));
-                            }
-                        } else {
-                            panic!("Expect LF after CR");
-                        }
-                    }
-                    LF => {
-                        // 无需处理
-                    }
-                    _ => {
-                        panic!("错误的响应类型: {}", response_type);
-                    }
-                }
-            }
         }
         
         pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
@@ -199,17 +100,16 @@ pub mod standalone {
             let repl_offset = offset.as_bytes();
             let repl_id = self.config.repl_id.as_bytes();
             
-            let conn = self.conn.as_ref().unwrap();
-            let conn = conn.stream.as_ref();
-            send(conn, b"PSYNC", &[repl_id, repl_offset])?;
+            let conn = self.conn.as_mut().unwrap();
+            conn.send(b"PSYNC", &[repl_id, repl_offset])?;
             
-            if let Bytes(resp) = self.response(rdb::read_bytes)? {
+            if let Bytes(resp) = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
                     if self.config.is_discard_rdb {
-                        self.response(rdb::skip)?;
+                        conn.reply(io::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     } else {
-                        self.response(rdb::parse)?;
+                        conn.reply(rdb::parse, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     }
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
@@ -240,13 +140,11 @@ pub mod standalone {
                     return Ok(false);
                 } else {
                     // 不支持PSYNC命令，改用SYNC命令
-                    let conn = self.conn.as_ref().unwrap();
-                    let conn = conn.stream.as_ref();
-                    send(conn, b"SYNC", &Vec::new())?;
+                    conn.send(b"SYNC", &Vec::new())?;
                     if self.config.is_discard_rdb {
-                        self.response(rdb::skip)?;
+                        conn.reply(io::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     } else {
-                        self.response(rdb::parse)?;
+                        conn.reply(rdb::parse, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
                     }
                     return Ok(true);
                 }
@@ -256,35 +154,14 @@ pub mod standalone {
         }
         
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-            // read begin
-            self.conn.as_mut().unwrap().mark();
-            let cmd = self.response(rdb::read_bytes);
-            let read_len = self.conn.as_mut().unwrap().unmark()?;
+            let conn = self.conn.as_mut().unwrap();
+            conn.mark();
+            let cmd = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
+            let read_len = conn.unmark()?;
             self.config.repl_offset += read_len;
             self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
             return cmd;
-            // read end, and get total bytes read
         }
-    }
-    
-    fn send<T: Write>(output: T, command: &[u8], args: &[&[u8]]) -> Result<()> {
-        let mut writer = BufWriter::new(output);
-        writer.write(&[STAR])?;
-        let args_len = args.len() + 1;
-        writer.write(&args_len.to_string().into_bytes())?;
-        writer.write(&[CR, LF, DOLLAR])?;
-        writer.write(&command.len().to_string().into_bytes())?;
-        writer.write(&[CR, LF])?;
-        writer.write(command)?;
-        writer.write(&[CR, LF])?;
-        for arg in args {
-            writer.write(&[DOLLAR])?;
-            writer.write(&arg.len().to_string().into_bytes())?;
-            writer.write(&[CR, LF])?;
-            writer.write(arg)?;
-            writer.write(&[CR, LF])?;
-        }
-        writer.flush()
     }
     
     impl RedisListener for Listener {
@@ -301,9 +178,7 @@ pub mod standalone {
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                    Ok(Data::BytesVec(data)) => {
-                        cmd::parse(data, &mut self.cmd_listener);
-                    }
+                    Ok(Data::BytesVec(data)) => cmd::parse(data, &mut self.cmd_listener),
                     Err(err) => return Err(err),
                     Ok(Empty) => {}
                 }
@@ -328,8 +203,8 @@ pub mod standalone {
         Listener {
             config: conf,
             conn: Option::None,
-            rdb_listener: Box::new(NoOpRdbHandler{}),
-            cmd_listener: Box::new(NoOpCommandHandler{}),
+            rdb_listener: Box::new(NoOpRdbHandler {}),
+            cmd_listener: Box::new(NoOpCommandHandler {}),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
         }
