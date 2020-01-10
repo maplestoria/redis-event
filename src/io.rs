@@ -25,6 +25,12 @@ impl ReadWrite for TcpStream {
     }
 }
 
+impl ReadWrite for File {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 pub(crate) struct Conn {
     pub(crate) input: Box<dyn ReadWrite>,
     len: i64,

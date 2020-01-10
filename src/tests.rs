@@ -8,12 +8,6 @@ mod test_cases {
     use crate::io::ReadWrite;
     use crate::rdb::Object;
     
-    impl ReadWrite for File {
-        fn as_any(&self) -> &dyn Any {
-            unimplemented!()
-        }
-    }
-    
     #[test]
     fn test_zipmap_not_compress() {
         let file = File::open("tests/rdb/zipmap_that_doesnt_compress.rdb").expect("file not found");
