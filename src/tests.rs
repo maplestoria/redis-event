@@ -374,4 +374,117 @@ mod aof_tests {
             }
         }
     }
+    
+    #[test]
+    fn test_aof2() {
+        let file = File::open("tests/aof/appendonly2.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {
+            count: isize
+        }
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Command) {
+                if let Command::SET(set) = cmd {
+                    let key = String::from_utf8_lossy(set.key);
+                    if key.starts_with("test_") {
+                        self.count += 1;
+                    }
+                }
+            }
+        }
+        
+        let mut handler = TestCmdHandler { count: 0 };
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+        
+        assert_eq!(48000, handler.count);
+    }
+    
+    #[test]
+    fn test_aof3() {
+        let file = File::open("tests/aof/appendonly3.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {
+            count: isize
+        }
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, _cmd: Command) {
+                self.count += 1;
+            }
+        }
+        
+        let mut handler = TestCmdHandler { count: 0 };
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+        
+        assert_eq!(92539, handler.count);
+    }
+    
+    #[test]
+    fn test_aof5() {
+        let file = File::open("tests/aof/appendonly5.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {
+            count: isize
+        }
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, _cmd: Command) {
+                self.count += 1;
+            }
+        }
+        
+        let mut handler = TestCmdHandler { count: 0 };
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+        
+        assert_eq!(71, handler.count);
+    }
 }
