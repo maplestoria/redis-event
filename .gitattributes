@@ -1,1 +1,2 @@
-*.aof text eol=crlf
+*.aof binary
+*.rdb binary
