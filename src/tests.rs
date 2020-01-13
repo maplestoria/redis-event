@@ -4,7 +4,7 @@ mod test_cases {
     use std::fs::File;
     
     use crate::{io, NoOpCommandHandler, rdb, RdbHandler};
-    use crate::rdb::Object;
+    use crate::rdb::{EvictType, ExpireType, Object};
     
     #[test]
     fn test_zipmap_not_compress() {
@@ -184,6 +184,122 @@ mod test_cases {
         }
         
         rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
+            .unwrap();
+    }
+    
+    #[test]
+    fn test_ziplist_with_integers() {
+        let file = File::open("tests/rdb/ziplist_with_integers.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl RdbHandler for TestRdbHandler {
+            fn handle(&mut self, data: Object) {
+                match data {
+                    Object::List(list) => {
+                        let key = String::from_utf8_lossy(list.key);
+                        assert_eq!("ziplist_with_integers", key);
+                        
+                        let vec = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+                            "11", "12", "13", "-2", "25", "-61", "63", "16380", "-16000", "65535",
+                            "-65523", "4194304", "9223372036854775807"];
+                        
+                        for val in list.values {
+                            let val = String::from_utf8_lossy(val);
+                            vec.contains(&val.as_ref());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+            .unwrap();
+    }
+    
+    #[test]
+    fn test_dump_lru() {
+        let file = File::open("tests/rdb/dump-lru.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl RdbHandler for TestRdbHandler {
+            fn handle(&mut self, data: Object) {
+                match data {
+                    Object::String(kv) => {
+                        let key = String::from_utf8_lossy(kv.key);
+                        if "key".eq(&key) {
+                            if let Some((ExpireType::Millisecond, val)) = kv.meta.expire {
+                                assert_eq!(1528592665231, val);
+                            } else {
+                                panic!("no expire");
+                            }
+                            if let Some((EvictType::Lru, val)) = kv.meta.evict {
+                                assert_eq!(4, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else if "key1".eq(&key) {
+                            if let Some((EvictType::Lru, val)) = kv.meta.evict {
+                                assert_eq!(1914611, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else {
+                            panic!("unknown key");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+            .unwrap();
+    }
+    
+    #[test]
+    fn test_dump_lfu() {
+        let file = File::open("tests/rdb/dump-lfu.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl RdbHandler for TestRdbHandler {
+            fn handle(&mut self, data: Object) {
+                match data {
+                    Object::String(kv) => {
+                        let key = String::from_utf8_lossy(kv.key);
+                        if "key".eq(&key) {
+                            if let Some((ExpireType::Millisecond, val)) = kv.meta.expire {
+                                assert_eq!(1528592896226, val);
+                            } else {
+                                panic!("no expire");
+                            }
+                            if let Some((EvictType::Lfu, val)) = kv.meta.evict {
+                                assert_eq!(4, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else if "key1".eq(&key) {
+                            if let Some((EvictType::Lfu, val)) = kv.meta.evict {
+                                assert_eq!(1, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else {
+                            panic!("unknown key");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
             .unwrap();
     }
 }

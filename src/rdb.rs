@@ -22,8 +22,8 @@ pub(crate) fn parse(input: &mut Conn,
     
     let mut meta = Meta {
         db: 0,
-        expired_type: None,
-        expired_time: None,
+        expire: None,
+        evict: None,
     };
     
     loop {
@@ -49,23 +49,23 @@ pub(crate) fn parse(input: &mut Conn,
             RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
                 if data_type == RDB_OPCODE_EXPIRETIME_MS {
                     let expired_time = input.read_integer(8, false)?;
-                    meta.expired_time = Option::Some(expired_time as i64);
-                    meta.expired_type = Option::Some(ExpireType::Millisecond);
+                    meta.expire = Option::Some((ExpireType::Millisecond, expired_time as i64));
                 } else {
                     let expired_time = input.read_integer(4, false)?;
-                    meta.expired_time = Option::Some(expired_time as i64);
-                    meta.expired_type = Option::Some(ExpireType::Second);
+                    meta.expire = Option::Some((ExpireType::Second, expired_time as i64));
                 }
                 let value_type = input.read_u8()?;
                 match value_type {
                     RDB_OPCODE_FREQ => {
-                        input.read_u8()?;
+                        let val = input.read_u8()?;
                         let value_type = input.read_u8()?;
+                        meta.evict = Option::Some((EvictType::Lfu, val as i64));
                         input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                     RDB_OPCODE_IDLE => {
-                        input.read_length()?;
+                        let (val, _) = input.read_length()?;
                         let value_type = input.read_u8()?;
+                        meta.evict = Option::Some((EvictType::Lru, val as i64));
                         input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                     _ => {
@@ -74,12 +74,14 @@ pub(crate) fn parse(input: &mut Conn,
                 }
             }
             RDB_OPCODE_FREQ => {
-                input.read_u8()?;
+                let val = input.read_u8()?;
                 let value_type = input.read_u8()?;
+                meta.evict = Option::Some((EvictType::Lfu, val as i64));
                 input.read_object(value_type, rdb_handlers, &meta)?;
             }
             RDB_OPCODE_IDLE => {
-                input.read_length()?;
+                let (val, _) = input.read_length()?;
+                meta.evict = Option::Some((EvictType::Lru, val as i64));
                 let value_type = input.read_u8()?;
                 input.read_object(value_type, rdb_handlers, &meta)?;
             }
@@ -194,14 +196,20 @@ pub enum Object<'a> {
 #[derive(Debug)]
 pub struct Meta {
     pub db: isize,
-    pub expired_type: Option<ExpireType>,
-    pub expired_time: Option<i64>,
+    pub expire: Option<(ExpireType, i64)>,
+    pub evict: Option<(EvictType, i64)>,
 }
 
 #[derive(Debug)]
 pub enum ExpireType {
     Second,
     Millisecond,
+}
+
+#[derive(Debug)]
+pub enum EvictType {
+    Lru,
+    Lfu,
 }
 
 #[derive(Debug)]

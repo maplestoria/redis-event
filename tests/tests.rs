@@ -225,8 +225,8 @@ fn test_keys_with_expiry() {
                     let val = String::from_utf8_lossy(kv.value).to_string();
                     assert_eq!("expires_ms_precision", key);
                     assert_eq!("2022-12-25 10:11:12.573 UTC", val);
-                    if let Some(ExpireType::Millisecond) = kv.meta.expired_type {
-                        assert_eq!(1671963072573, kv.meta.expired_time.unwrap());
+                    if let Some((ExpireType::Millisecond, val)) = kv.meta.expire {
+                        assert_eq!(1671963072573, val);
                     } else {
                         panic!("错误的过期类型")
                     }
