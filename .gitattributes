@@ -1,2 +1,2 @@
-*.aof binary
-*.rdb binary
+*.aof -crlf
+*.rdb -crlf
