@@ -1,4 +1,5 @@
 pub mod standalone {
+    use std::borrow::Borrow;
     use std::io::Result;
     use std::net::TcpStream;
     use std::result::Result::Ok;
@@ -11,8 +12,7 @@ pub mod standalone {
     use crate::config::Config;
     use crate::io::{Conn, send};
     use crate::rdb::Data;
-    use crate::rdb::Data::{Bytes, Empty};
-    use std::borrow::Borrow;
+    use crate::rdb::Data::Bytes;
     
     // 用于监听单个Redis实例的事件
     pub struct Listener {
@@ -178,9 +178,9 @@ pub mod standalone {
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                    Ok(Data::BytesVec(data)) => cmd::parse(data, &mut self.cmd_listener),
+                    Ok(Data::BytesVec(data)) => cmd::parse(data, self.cmd_listener.as_mut()),
                     Err(err) => return Err(err),
-                    Ok(Empty) => {}
+                    Ok(Data::Empty) => {}
                 }
             }
         }

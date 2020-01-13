@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test_cases {
+mod rdb_tests {
     use std::collections::HashMap;
     use std::fs::File;
     
@@ -301,5 +301,77 @@ mod test_cases {
         
         rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod aof_tests {
+    use std::error::Error;
+    use std::fs::File;
+    
+    use crate::{cmd, CommandHandler, io, NoOpRdbHandler};
+    use crate::cmd::Command;
+    use crate::rdb::Data;
+    
+    #[test]
+    fn test_aof1() {
+        let file = File::open("tests/aof/appendonly1.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {}
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Command) {
+                match cmd {
+                    Command::HMSET(hmset) => {
+                        let key = String::from_utf8_lossy(hmset.key);
+                        if "key".eq(&key) {
+                            for field in &hmset.fields {
+                                let name = String::from_utf8_lossy(field.name);
+                                if "field".eq(&name) {
+                                    let val = String::from_utf8_lossy(field.value);
+                                    assert_eq!("a", val);
+                                } else if "field1".eq(&name) {
+                                    let val = String::from_utf8_lossy(field.value);
+                                    assert_eq!("b", val);
+                                } else {
+                                    panic!("wrong name");
+                                }
+                            }
+                        } else {
+                            panic!("wrong key");
+                        }
+                    }
+                    Command::SELECT(select) => {
+                        assert_eq!(0, select.db);
+                    }
+                    Command::SET(set) => {
+                        let key = String::from_utf8_lossy(set.key);
+                        let val = String::from_utf8_lossy(set.value);
+                        assert_eq!("a", key);
+                        assert_eq!("b", val);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        let mut handler = TestCmdHandler {};
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
     }
 }

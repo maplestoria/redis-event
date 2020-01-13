@@ -170,6 +170,7 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
 }
 
 /// Redis中的各个数据类型
+#[derive(Debug)]
 pub enum Object<'a> {
     /// String:
     String(KeyValue<'a>),
@@ -219,18 +220,21 @@ pub struct KeyValue<'a> {
     pub meta: &'a Meta,
 }
 
+#[derive(Debug)]
 pub struct List<'a> {
     pub key: &'a [u8],
     pub values: &'a [Vec<u8>],
     pub meta: &'a Meta,
 }
 
+#[derive(Debug)]
 pub struct Set<'a> {
     pub key: &'a [u8],
     pub members: &'a [Vec<u8>],
     pub meta: &'a Meta,
 }
 
+#[derive(Debug)]
 pub struct SortedSet<'a> {
     pub key: &'a [u8],
     pub items: &'a [Item],
@@ -243,6 +247,7 @@ pub struct Item {
     pub score: f64,
 }
 
+#[derive(Debug)]
 pub struct Hash<'a> {
     pub key: &'a [u8],
     pub fields: &'a [Field],

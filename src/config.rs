@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+#[derive(Debug)]
 pub struct Config {
     pub is_discard_rdb: bool,
     pub is_aof: bool,
