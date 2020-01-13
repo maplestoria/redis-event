@@ -161,8 +161,7 @@ pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
 pub struct SET<'a> {
     pub key: &'a [u8],
     pub value: &'a [u8],
-    pub expire_type: Option<ExpireType>,
-    pub expire_time: Option<&'a Vec<u8>>,
+    pub expire: Option<(ExpireType, &'a Vec<u8>)>,
     pub exist_type: Option<ExistType>,
 }
 
@@ -190,6 +189,7 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     let mut expire_time = None;
     let mut expire_type = None;
     let mut exist_type = None;
+    let mut expire = None;
     
     for arg in iter {
         let arg_string = String::from_utf8_lossy(arg);
@@ -207,8 +207,10 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
             expire_time = Some(arg);
         }
     }
-    
-    SET { key, value, expire_type, exist_type, expire_time }
+    if expire_type.is_some() && expire_time.is_some() {
+        expire = Some((expire_type.unwrap(), expire_time.unwrap()));
+    }
+    SET { key, value, exist_type, expire }
 }
 
 #[derive(Debug)]

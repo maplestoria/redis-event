@@ -10,7 +10,7 @@ use crate::rdb::{Field, Item, read_zip_list_entry, read_zm_len};
 ///
 /// 后续再看怎么优化代码
 
-pub trait Iter {
+pub(crate) trait Iter {
     fn next(&mut self) -> io::Result<Vec<u8>>;
 }
 

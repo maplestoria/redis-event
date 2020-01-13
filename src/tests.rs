@@ -1,10 +1,10 @@
 #[cfg(test)]
-mod test_cases {
+mod rdb_tests {
     use std::collections::HashMap;
     use std::fs::File;
     
     use crate::{io, NoOpCommandHandler, rdb, RdbHandler};
-    use crate::rdb::Object;
+    use crate::rdb::{EvictType, ExpireType, Object};
     
     #[test]
     fn test_zipmap_not_compress() {
@@ -185,5 +185,306 @@ mod test_cases {
         
         rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
             .unwrap();
+    }
+    
+    #[test]
+    fn test_ziplist_with_integers() {
+        let file = File::open("tests/rdb/ziplist_with_integers.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl RdbHandler for TestRdbHandler {
+            fn handle(&mut self, data: Object) {
+                match data {
+                    Object::List(list) => {
+                        let key = String::from_utf8_lossy(list.key);
+                        assert_eq!("ziplist_with_integers", key);
+                        
+                        let vec = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+                            "11", "12", "13", "-2", "25", "-61", "63", "16380", "-16000", "65535",
+                            "-65523", "4194304", "9223372036854775807"];
+                        
+                        for val in list.values {
+                            let val = String::from_utf8_lossy(val);
+                            vec.contains(&val.as_ref());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+            .unwrap();
+    }
+    
+    #[test]
+    fn test_dump_lru() {
+        let file = File::open("tests/rdb/dump-lru.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl RdbHandler for TestRdbHandler {
+            fn handle(&mut self, data: Object) {
+                match data {
+                    Object::String(kv) => {
+                        let key = String::from_utf8_lossy(kv.key);
+                        if "key".eq(&key) {
+                            if let Some((ExpireType::Millisecond, val)) = kv.meta.expire {
+                                assert_eq!(1528592665231, val);
+                            } else {
+                                panic!("no expire");
+                            }
+                            if let Some((EvictType::Lru, val)) = kv.meta.evict {
+                                assert_eq!(4, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else if "key1".eq(&key) {
+                            if let Some((EvictType::Lru, val)) = kv.meta.evict {
+                                assert_eq!(1914611, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else {
+                            panic!("unknown key");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+            .unwrap();
+    }
+    
+    #[test]
+    fn test_dump_lfu() {
+        let file = File::open("tests/rdb/dump-lfu.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl RdbHandler for TestRdbHandler {
+            fn handle(&mut self, data: Object) {
+                match data {
+                    Object::String(kv) => {
+                        let key = String::from_utf8_lossy(kv.key);
+                        if "key".eq(&key) {
+                            if let Some((ExpireType::Millisecond, val)) = kv.meta.expire {
+                                assert_eq!(1528592896226, val);
+                            } else {
+                                panic!("no expire");
+                            }
+                            if let Some((EvictType::Lfu, val)) = kv.meta.evict {
+                                assert_eq!(4, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else if "key1".eq(&key) {
+                            if let Some((EvictType::Lfu, val)) = kv.meta.evict {
+                                assert_eq!(1, val);
+                            } else {
+                                panic!("no evict");
+                            }
+                        } else {
+                            panic!("unknown key");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+            .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod aof_tests {
+    use std::error::Error;
+    use std::fs::File;
+    
+    use crate::{cmd, CommandHandler, io, NoOpRdbHandler};
+    use crate::cmd::Command;
+    use crate::rdb::Data;
+    
+    #[test]
+    fn test_aof1() {
+        let file = File::open("tests/aof/appendonly1.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {}
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Command) {
+                match cmd {
+                    Command::HMSET(hmset) => {
+                        let key = String::from_utf8_lossy(hmset.key);
+                        if "key".eq(&key) {
+                            for field in &hmset.fields {
+                                let name = String::from_utf8_lossy(field.name);
+                                if "field".eq(&name) {
+                                    let val = String::from_utf8_lossy(field.value);
+                                    assert_eq!("a", val);
+                                } else if "field1".eq(&name) {
+                                    let val = String::from_utf8_lossy(field.value);
+                                    assert_eq!("b", val);
+                                } else {
+                                    panic!("wrong name");
+                                }
+                            }
+                        } else {
+                            panic!("wrong key");
+                        }
+                    }
+                    Command::SELECT(select) => {
+                        assert_eq!(0, select.db);
+                    }
+                    Command::SET(set) => {
+                        let key = String::from_utf8_lossy(set.key);
+                        let val = String::from_utf8_lossy(set.value);
+                        assert_eq!("a", key);
+                        assert_eq!("b", val);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        let mut handler = TestCmdHandler {};
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+    }
+    
+    #[test]
+    fn test_aof2() {
+        let file = File::open("tests/aof/appendonly2.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {
+            count: isize
+        }
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Command) {
+                if let Command::SET(set) = cmd {
+                    let key = String::from_utf8_lossy(set.key);
+                    if key.starts_with("test_") {
+                        self.count += 1;
+                    }
+                }
+            }
+        }
+        
+        let mut handler = TestCmdHandler { count: 0 };
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+        
+        assert_eq!(48000, handler.count);
+    }
+    
+    #[test]
+    fn test_aof3() {
+        let file = File::open("tests/aof/appendonly3.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {
+            count: isize
+        }
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, _cmd: Command) {
+                self.count += 1;
+            }
+        }
+        
+        let mut handler = TestCmdHandler { count: 0 };
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+        
+        assert_eq!(92539, handler.count);
+    }
+    
+    #[test]
+    fn test_aof5() {
+        let file = File::open("tests/aof/appendonly5.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {
+            count: isize
+        }
+        
+        impl CommandHandler for TestCmdHandler {
+            fn handle(&mut self, _cmd: Command) {
+                self.count += 1;
+            }
+        }
+        
+        let mut handler = TestCmdHandler { count: 0 };
+        
+        loop {
+            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(err.description()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
+        
+        assert_eq!(71, handler.count);
     }
 }

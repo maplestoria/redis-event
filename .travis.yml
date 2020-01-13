@@ -1,16 +1,22 @@
 language: rust
+
 sudo: required
+
 dist: trusty
+
 addons:
   apt:
     packages:
       - libssl-dev
       - redis-server
+
 cache: cargo
+
 rust:
   - stable
   - beta
   - nightly
+
 matrix:
   allow_failures:
     - rust: nightly
