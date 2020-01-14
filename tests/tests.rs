@@ -1,13 +1,19 @@
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::ops::{Deref, DerefMut};
 use std::process::Command;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
+use redis;
+use redis::Commands;
 use serial_test::serial;
 
-use redis_event::{CommandHandler, NoOpCommandHandler, RdbHandler, RedisListener};
+use redis_event::{cmd, CommandHandler, NoOpCommandHandler, NoOpRdbHandler, RdbHandler, RedisListener};
 use redis_event::config::Config;
 use redis_event::listener::standalone;
 use redis_event::rdb::{ExpireType, Object};
@@ -476,6 +482,98 @@ fn test_ziplist() {
         }
     }
     start_redis_test("ziplist_that_compresses_easily.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
+}
+
+#[test]
+#[serial]
+fn test_aof() {
+    let pid = Command::new("redis-server")
+        .arg("--port")
+        .arg("16379")
+        .arg("--requirepass")
+        .arg("123456")
+        .arg("--daemonize")
+        .arg("no")
+        .arg("--loglevel")
+        .arg("warning")
+        .spawn()
+        .expect("failed to start redis-server")
+        .id();
+    
+    // wait redis to start
+    sleep(Duration::from_secs(2));
+    
+    struct TestCmdHandler {
+        pid: u32,
+        count: Arc<Mutex<i32>>,
+    }
+    
+    impl CommandHandler for TestCmdHandler {
+        fn handle(&mut self, cmd: cmd::Command) {
+            println!("{:?}", cmd);
+            if let Ok(mut count) = self.count.lock() {
+                let c = count.borrow_mut();
+                let c = c.deref_mut();
+                *c += 1;
+            }
+            match cmd {
+                cmd::Command::EXPIRE(expire) => {
+                    assert_eq!(b"aa", expire.key);
+                    assert_eq!(b"1", expire.seconds);
+                }
+                cmd::Command::DEL(del) => {
+                    assert_eq!(b"aa", del.keys.get(0).unwrap().as_slice());
+                    shutdown_redis(self.pid);
+                }
+                cmd::Command::SELECT(select) => {
+                    assert_eq!(0, select.db);
+                }
+                cmd::Command::SET(set) => {
+                    assert_eq!(b"aa", set.key);
+                    assert_eq!(b"bb", set.value);
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    let cmd_count = Arc::new(Mutex::new(0));
+    
+    let rc = cmd_count.clone();
+    
+    let t = thread::spawn(move || {
+        let cmd_handler = TestCmdHandler { pid, count: rc };
+        
+        let ip = IpAddr::from_str("127.0.0.1").unwrap();
+        let conf = Config {
+            is_discard_rdb: false,
+            is_aof: true,
+            addr: SocketAddr::new(ip, 16379),
+            password: String::from("123456"),
+            repl_id: String::from("?"),
+            repl_offset: -1,
+        };
+        let mut redis_listener = standalone::new(conf);
+        redis_listener.set_rdb_listener(Box::new(NoOpRdbHandler {}));
+        redis_listener.set_command_listener(Box::new(cmd_handler));
+        if let Err(_) = redis_listener.open() {
+            println!("redis-server closed");
+        }
+    });
+    // wait thread start
+    thread::sleep(Duration::from_secs(2));
+    
+    if let Ok(client) = redis::Client::open("redis://:123456@127.0.0.1:16379/0") {
+        if let Ok(mut conn) = client.get_connection() {
+            let _: () = conn.set("aa", "bb").unwrap();
+            let _: () = conn.expire("aa", 1).unwrap();
+            t.join().expect("thread error");
+        } else {
+            shutdown_redis(pid);
+        }
+    }
+    
+    assert_eq!(4, *cmd_count.lock().unwrap().deref());
 }
 
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {

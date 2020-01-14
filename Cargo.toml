@@ -12,3 +12,4 @@ log = "0.4"
 
 [dev-dependencies]
 serial_test = "0.3.2"
+redis = "0.14.0"

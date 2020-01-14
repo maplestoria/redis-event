@@ -162,7 +162,9 @@ pub mod standalone {
             let cmd = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
             let read_len = conn.unmark()?;
             self.config.repl_offset += read_len;
-            self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
+            if let Err(error) = self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)) {
+                error!("repl offset send error: {}", error);
+            }
             return cmd;
         }
     }
