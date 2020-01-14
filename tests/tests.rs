@@ -510,20 +510,36 @@ fn test_aof() {
     
     impl CommandHandler for TestCmdHandler {
         fn handle(&mut self, cmd: cmd::Command) {
-            println!("{:?}", cmd);
             if let Ok(mut count) = self.count.lock() {
                 let c = count.borrow_mut();
                 let c = c.deref_mut();
                 *c += 1;
             }
             match cmd {
+                cmd::Command::FLUSHDB(flushdb) => {
+                    assert_eq!(true, flushdb._async.expect("no async field"));
+                }
+                cmd::Command::FLUSHALL(_) => {
+                    shutdown_redis(self.pid);
+                }
                 cmd::Command::EXPIRE(expire) => {
                     assert_eq!(b"aa", expire.key);
                     assert_eq!(b"1", expire.seconds);
                 }
-                cmd::Command::DEL(del) => {
-                    assert_eq!(b"aa", del.keys.get(0).unwrap().as_slice());
-                    shutdown_redis(self.pid);
+                cmd::Command::LINSERT(linsert) => {
+                    assert_eq!(b"list", linsert.key);
+                    if let cmd::lists::POSITION::AFTER = linsert.position {
+                        panic!("wrong position");
+                    }
+                }
+                cmd::Command::RPOPLPUSH(rpoplpush) => {
+                    assert_eq!(b"list", rpoplpush.source);
+                    assert_eq!(b"destlist", rpoplpush.destination);
+                }
+                cmd::Command::RPUSH(rpush) => {
+                    assert_eq!(b"list", rpush.key);
+                    assert_eq!(1, rpush.elements.len());
+                    assert_eq!(b"hello", rpush.elements.get(0).unwrap());
                 }
                 cmd::Command::SELECT(select) => {
                     assert_eq!(0, select.db);
@@ -567,13 +583,20 @@ fn test_aof() {
         if let Ok(mut conn) = client.get_connection() {
             let _: () = conn.set("aa", "bb").unwrap();
             let _: () = conn.expire("aa", 1).unwrap();
+            let _: () = redis::cmd("SET").arg("aa").arg("bb").arg("EX").arg("100").arg("XX").query(&mut conn).unwrap();
+            let _: () = conn.rpush("list", "hello").unwrap();
+            let _: () = redis::cmd("LINSERT").arg("list").arg("BEFORE").arg("hello").arg("world").query(&mut conn).unwrap();
+            let _: () = conn.rpoplpush("list", "destlist").unwrap();
+            // flush all, end the test
+            let _: () = redis::cmd("FLUSHDB").arg("ASYNC").query(&mut conn).unwrap();
+            let _: () = redis::cmd("FLUSHALL").arg("ASYNC").query(&mut conn).unwrap();
             t.join().expect("thread error");
         } else {
             shutdown_redis(pid);
         }
     }
     
-    assert_eq!(4, *cmd_count.lock().unwrap().deref());
+    assert_eq!(9, *cmd_count.lock().unwrap().deref());
 }
 
 fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
