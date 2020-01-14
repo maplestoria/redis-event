@@ -1,3 +1,5 @@
+use log::error;
+
 use crate::cmd::connection::{SELECT, SWAPDB};
 use crate::cmd::hashes::*;
 use crate::cmd::hyperloglog::{PFADD, PFCOUNT, PFMERGE};
@@ -410,7 +412,7 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut dyn CommandHandler) {
             }
             "PING" => cmd_handler.handle(Command::PING),
             _ => {
-                eprintln!("unknown command: {}", cmd_name);
+                error!("unknown command: {}", cmd_name);
             }
         };
     }

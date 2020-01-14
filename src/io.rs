@@ -37,6 +37,7 @@ pub(crate) struct Conn {
     marked: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn from_file(file: File) -> Conn {
     Conn { input: Box::new(file), len: 0, marked: false }
 }
@@ -47,10 +48,9 @@ pub(crate) fn new(input: TcpStream) -> Conn {
 
 impl Conn {
     pub(crate) fn reply(&mut self,
-                        func: fn(input: &mut Conn, isize,
+                        func: fn(&mut Conn, isize,
                                  &mut dyn RdbHandler,
-                                 &mut dyn CommandHandler,
-                        ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
+                                 &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
                         rdb_handler: &mut dyn RdbHandler,
                         cmd_handler: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
         loop {
@@ -144,6 +144,7 @@ impl Conn {
             }
         }
     }
+    
     pub(crate) fn mark(&mut self) {
         self.marked = true;
     }

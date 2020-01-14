@@ -8,6 +8,8 @@ pub mod standalone {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
+    use log::{error, info};
+    
     use crate::{cmd, CommandHandler, io, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, to_string};
     use crate::config::Config;
     use crate::io::{Conn, send};
@@ -27,7 +29,7 @@ pub mod standalone {
     impl Listener {
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
-            println!("connected to server!");
+            info!("connected to server {}", self.config.addr.to_string());
             let mut stream_boxed = stream.try_clone();
             let stream = stream;
             let (sender, receiver) = mpsc::channel();
@@ -37,6 +39,7 @@ pub mod standalone {
                 let output = stream_boxed.as_mut().unwrap();
                 let mut timer = Instant::now();
                 let half_sec = Duration::from_millis(500);
+                info!("heartbeat thread started");
                 loop {
                     match receiver.recv_timeout(half_sec) {
                         Ok(Message::Terminate) => break,
@@ -50,13 +53,13 @@ pub mod standalone {
                         let offset_str = offset.to_string();
                         let offset_bytes = offset_str.as_bytes();
                         if let Err(error) = send(output, b"REPLCONF", &[b"ACK", offset_bytes]) {
-                            println!("heartbeat error: {}", error);
+                            error!("heartbeat error: {}", error);
                             break;
                         }
                         timer = Instant::now();
                     }
                 }
-                println!("terminated");
+                info!("heartbeat thread terminated");
             });
             
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
@@ -159,7 +162,9 @@ pub mod standalone {
             let cmd = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
             let read_len = conn.unmark()?;
             self.config.repl_offset += read_len;
-            self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)).unwrap();
+            if let Err(error) = self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)) {
+                error!("repl offset send error: {}", error);
+            }
             return cmd;
         }
     }
@@ -190,7 +195,7 @@ pub mod standalone {
         fn drop(&mut self) {
             if let Some(sender) = self.sender.as_ref() {
                 if let Err(err) = sender.send(Message::Terminate) {
-                    eprintln!("{}", err)
+                    error!("Closing heartbeat thread error: {}", err)
                 }
             }
             if let Some(thread) = self.t_heartbeat.thread.take() {

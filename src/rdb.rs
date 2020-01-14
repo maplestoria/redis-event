@@ -1,6 +1,7 @@
 use std::io::{Cursor, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use log::info;
 
 use crate::{CommandHandler, RdbHandler, to_string};
 use crate::io::Conn;
@@ -34,7 +35,7 @@ pub(crate) fn parse(input: &mut Conn,
                 let field_val = input.read_string()?;
                 let field_name = to_string(field_name);
                 let field_val = to_string(field_val);
-                println!("{}:{}", field_name, field_val);
+                info!("{}:{}", field_name, field_val);
             }
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
@@ -42,9 +43,9 @@ pub(crate) fn parse(input: &mut Conn,
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;
-                println!("db total keys: {}", db);
+                info!("db total keys: {}", db);
                 let (db, _) = input.read_length()?;
-                println!("db expired keys: {}", db);
+                info!("db expired keys: {}", db);
             }
             RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
                 if data_type == RDB_OPCODE_EXPIRETIME_MS {
