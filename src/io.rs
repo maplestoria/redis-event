@@ -541,12 +541,15 @@ impl Conn {
             }
             RDB_TYPE_MODULE => {
                 // TODO
+                unimplemented!("RDB_TYPE_MODULE");
             }
             RDB_TYPE_MODULE_2 => {
                 // TODO
+                unimplemented!("RDB_TYPE_MODULE_2");
             }
             RDB_TYPE_STREAM_LISTPACKS => {
                 // TODO
+                unimplemented!("RDB_TYPE_STREAM_LISTPACKS");
             }
             _ => panic!("unknown data type: {}", value_type)
         }

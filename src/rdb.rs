@@ -91,6 +91,7 @@ pub(crate) fn parse(input: &mut Conn,
             }
             RDB_OPCODE_MODULE_AUX => {
                 // TODO
+                unimplemented!("RDB_OPCODE_MODULE_AUX");
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
