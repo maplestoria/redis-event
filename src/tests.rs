@@ -237,13 +237,13 @@ mod rdb_tests {
                             } else {
                                 panic!("no expire");
                             }
-                            if let Some((EvictType::Lru, val)) = kv.meta.evict {
+                            if let Some((EvictType::LRU, val)) = kv.meta.evict {
                                 assert_eq!(4, val);
                             } else {
                                 panic!("no evict");
                             }
                         } else if "key1".eq(&key) {
-                            if let Some((EvictType::Lru, val)) = kv.meta.evict {
+                            if let Some((EvictType::LRU, val)) = kv.meta.evict {
                                 assert_eq!(1914611, val);
                             } else {
                                 panic!("no evict");
@@ -279,13 +279,13 @@ mod rdb_tests {
                             } else {
                                 panic!("no expire");
                             }
-                            if let Some((EvictType::Lfu, val)) = kv.meta.evict {
+                            if let Some((EvictType::LFU, val)) = kv.meta.evict {
                                 assert_eq!(4, val);
                             } else {
                                 panic!("no evict");
                             }
                         } else if "key1".eq(&key) {
-                            if let Some((EvictType::Lfu, val)) = kv.meta.evict {
+                            if let Some((EvictType::LFU, val)) = kv.meta.evict {
                                 assert_eq!(1, val);
                             } else {
                                 panic!("no evict");

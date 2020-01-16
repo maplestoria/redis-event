@@ -1,3 +1,7 @@
+/*!
+This crate provides redis event listener
+*/
+
 use std::io::Result;
 
 use crate::cmd::Command;
@@ -12,12 +16,7 @@ pub mod rdb;
 mod io;
 mod tests;
 
-/// 定义redis监听者接口
-///
-/// 具有以下三种监听模式:
-///- 单节点(standalone)
-/// - 集群(cluster)
-/// - 哨兵(sentinel)
+/// RedisListener
 pub trait RedisListener {
     /// 开启监听
     fn open(&mut self) -> Result<()>;

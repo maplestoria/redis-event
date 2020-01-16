@@ -1,8 +1,13 @@
+/*!
+Connection相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#connection
+*/
+
 use std::slice::Iter;
 
-/// 这个模块处理connection相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#connection
-///
 #[derive(Debug)]
 pub struct SELECT {
     pub db: i32

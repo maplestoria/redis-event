@@ -1,8 +1,13 @@
+/*!
+Pub/Sub相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#pubsub
+*/
+
 use std::slice::Iter;
 
-/// 这个模块处理pub/sub相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#pubsub
-///
 #[derive(Debug)]
 pub struct PUBLISH<'a> {
     pub channel: &'a [u8],

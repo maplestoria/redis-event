@@ -1,3 +1,13 @@
+/*!
+[`RedisListener`]接口的具体实现
+
+此模块包括：
+- `standalone`, 处理单节点Redis事件
+- `sentinel`, 处理sentinel模式Redis事件
+- `cluster`, 处理cluster模式Redis事件
+
+[`RedisListener`]: trait.RedisListener.html
+*/
 pub mod standalone {
     use std::borrow::Borrow;
     use std::io::Result;
@@ -16,7 +26,7 @@ pub mod standalone {
     use crate::rdb::Data;
     use crate::rdb::Data::Bytes;
     
-    // 用于监听单个Redis实例的事件
+    /// 用于监听单个Redis实例的事件
     pub struct Listener {
         config: Config,
         conn: Option<Conn>,
@@ -204,6 +214,7 @@ pub mod standalone {
         }
     }
     
+    /// Listener实例的创建方法
     pub fn new(conf: Config) -> Listener {
         Listener {
             config: conf,

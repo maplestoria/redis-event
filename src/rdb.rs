@@ -1,3 +1,6 @@
+/*!
+RDB中各项Redis数据相关的结构体定义，以及RDB解析相关的代码在此模块下
+*/
 use std::io::{Cursor, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -60,13 +63,13 @@ pub(crate) fn parse(input: &mut Conn,
                     RDB_OPCODE_FREQ => {
                         let val = input.read_u8()?;
                         let value_type = input.read_u8()?;
-                        meta.evict = Option::Some((EvictType::Lfu, val as i64));
+                        meta.evict = Option::Some((EvictType::LFU, val as i64));
                         input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                     RDB_OPCODE_IDLE => {
                         let (val, _) = input.read_length()?;
                         let value_type = input.read_u8()?;
-                        meta.evict = Option::Some((EvictType::Lru, val as i64));
+                        meta.evict = Option::Some((EvictType::LRU, val as i64));
                         input.read_object(value_type, rdb_handlers, &meta)?;
                     }
                     _ => {
@@ -77,12 +80,12 @@ pub(crate) fn parse(input: &mut Conn,
             RDB_OPCODE_FREQ => {
                 let val = input.read_u8()?;
                 let value_type = input.read_u8()?;
-                meta.evict = Option::Some((EvictType::Lfu, val as i64));
+                meta.evict = Option::Some((EvictType::LFU, val as i64));
                 input.read_object(value_type, rdb_handlers, &meta)?;
             }
             RDB_OPCODE_IDLE => {
                 let (val, _) = input.read_length()?;
-                meta.evict = Option::Some((EvictType::Lru, val as i64));
+                meta.evict = Option::Some((EvictType::LRU, val as i64));
                 let value_type = input.read_u8()?;
                 input.read_object(value_type, rdb_handlers, &meta)?;
             }
@@ -170,94 +173,124 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
     }
 }
 
-/// Redis中的各个数据类型
+/// 封装Redis中的各种数据类型，由`RdbHandler`统一处理
 #[derive(Debug)]
 pub enum Object<'a> {
-    /// String:
+    /// 代表Redis中的String类型数据
     String(KeyValue<'a>),
-    
-    /// List:
+    /// 代表Redis中的List类型数据
     List(List<'a>),
-    
-    /// Set:
+    /// 代表Redis中的Set类型数据
     Set(Set<'a>),
-    
-    /// SortedSet:
+    /// 代表Redis中的SortedSet类型数据
     SortedSet(SortedSet<'a>),
-    
-    /// Hash:
+    /// 代表Redis中的Hash类型数据
     Hash(Hash<'a>),
-    
-    /// being of rdb
+    /// 代表rdb数据解析开始
     BOR,
-    
-    /// end of rdb
+    /// 代表rdb数据解析完毕
     EOR,
 }
 
+/// 数据的元信息, 包括数据过期类型, 内存驱逐类型, 数据所属的db
 #[derive(Debug)]
 pub struct Meta {
+    /// 数据所属的db
     pub db: isize,
+    /// 左为过期时间类型，右为过期时间
     pub expire: Option<(ExpireType, i64)>,
+    /// 左为内存驱逐类型，右为被驱逐掉的值
     pub evict: Option<(EvictType, i64)>,
 }
 
+/// 过期类型
 #[derive(Debug)]
 pub enum ExpireType {
+    /// 以秒计算过期时间
     Second,
+    /// 以毫秒计算过期时间
     Millisecond,
 }
 
+/// 内存驱逐类型
 #[derive(Debug)]
 pub enum EvictType {
-    Lru,
-    Lfu,
+    /// Least Recently Used
+    LRU,
+    /// Least Frequently Used
+    LFU,
 }
 
+/// 代表Redis中的String类型数据
 #[derive(Debug)]
 pub struct KeyValue<'a> {
+    /// 数据的key
     pub key: &'a [u8],
+    /// 数据的值
     pub value: &'a [u8],
+    /// 数据的元信息
     pub meta: &'a Meta,
 }
 
+/// 代表Redis中的List类型数据
 #[derive(Debug)]
 pub struct List<'a> {
+    /// 数据的key
     pub key: &'a [u8],
+    /// Set中所有的元素
     pub values: &'a [Vec<u8>],
+    /// 数据的元信息
     pub meta: &'a Meta,
 }
 
+/// 代表Redis中的Set类型数据
 #[derive(Debug)]
 pub struct Set<'a> {
+    /// 数据的key
     pub key: &'a [u8],
+    /// Set中所有的元素
     pub members: &'a [Vec<u8>],
+    /// 数据的元信息
     pub meta: &'a Meta,
 }
 
+/// 代表Redis中的SortedSet类型数据
 #[derive(Debug)]
 pub struct SortedSet<'a> {
+    /// 数据的key
     pub key: &'a [u8],
+    /// SortedSet中所有的元素
     pub items: &'a [Item],
+    /// 数据的元信息
     pub meta: &'a Meta,
 }
 
+/// SortedSet中的一条元素
 #[derive(Debug)]
 pub struct Item {
+    /// 元素值
     pub member: Vec<u8>,
+    /// 元素的排序分数
     pub score: f64,
 }
 
+/// 代表Redis中的Hash类型数据
 #[derive(Debug)]
 pub struct Hash<'a> {
+    /// 数据的key
     pub key: &'a [u8],
+    /// 数据所有的字段
     pub fields: &'a [Field],
+    /// 数据的元信息
     pub meta: &'a Meta,
 }
 
+/// Hash类型数据中的一个字段
 #[derive(Debug)]
 pub struct Field {
+    /// 字段名
     pub name: Vec<u8>,
+    /// 字段值
     pub value: Vec<u8>,
 }
 

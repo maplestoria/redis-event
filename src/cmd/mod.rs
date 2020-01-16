@@ -1,3 +1,17 @@
+/*!
+所有支持的Redis命令的定义，以及命令相关的解析代码俱在此模块下
+
+此模块包括:
+- 所有支持的Redis命令定义，见于枚举[Command]及各个子模块
+- 相关Redis命令的解析代码，见于各个子模块
+
+子模块的命名与分组，按照[Redis Command Reference]中的`filter by group`进行命名与分组，各个命令所对应的结构体中的字段命名已尽可能和文档中的保持一致。
+
+所有涉及到的命令参考[Redis Command Reference]所描述。
+
+[Command]: enum.Command.html
+[Redis Command Reference]: https://redis.io/commands
+*/
 use log::error;
 
 use crate::cmd::connection::{SELECT, SWAPDB};
@@ -25,6 +39,9 @@ pub mod sets;
 pub mod sorted_sets;
 pub mod strings;
 
+/// 所有支持的Redis命令
+///
+/// 不在此枚举中的Redis命令均不支持
 #[derive(Debug)]
 pub enum Command<'a> {
     APPEND(&'a APPEND<'a>),
@@ -60,7 +77,6 @@ pub enum Command<'a> {
     MSET(&'a MSET<'a>),
     MSETNX(&'a MSETNX<'a>),
     MULTI,
-    PING,
     PERSIST(&'a PERSIST<'a>),
     PEXPIRE(&'a PEXPIRE<'a>),
     PEXPIREAT(&'a PEXPIREAT<'a>),
@@ -410,7 +426,9 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut dyn CommandHandler) {
                 let cmd = sorted_sets::parse_zunionstore(iter);
                 cmd_handler.handle(Command::ZUNIONSTORE(&cmd));
             }
-            "PING" => cmd_handler.handle(Command::PING),
+            "PING" => {
+                // PING命令是由Redis master主动发送过来，判断下游节点是否活跃，不需要处理
+            }
             _ => {
                 error!("unknown command: {}", cmd_name);
             }

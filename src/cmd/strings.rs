@@ -1,10 +1,15 @@
+/*!
+Strings相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#string
+*/
+
 use core::slice::Iter;
 
 use crate::cmd::strings::Op::{AND, NOT, OR, XOR};
 
-/// 这个模块处理Strings相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#string
-///
 #[derive(Debug)]
 pub struct APPEND<'a> {
     pub key: &'a [u8],

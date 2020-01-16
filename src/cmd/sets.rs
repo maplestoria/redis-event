@@ -1,8 +1,13 @@
+/*!
+Sets相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#set
+*/
+
 use std::slice::Iter;
 
-/// 这个模块处理sets相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#set
-///
 #[derive(Debug)]
 pub struct SINTERSTORE<'a> {
     pub destination: &'a [u8],

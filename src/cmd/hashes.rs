@@ -1,8 +1,13 @@
+/*!
+Hashes相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#hash
+*/
+
 use std::slice::Iter;
 
-/// 这个模块处理hash相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#hash
-///
 #[derive(Debug)]
 pub struct HDEL<'a> {
     pub key: &'a [u8],

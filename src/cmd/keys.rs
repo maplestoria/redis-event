@@ -1,10 +1,15 @@
+/*!
+Keys相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#generic
+*/
+
 use std::slice::Iter;
 
 use crate::cmd::keys::ORDER::{ASC, DESC};
 
-/// 这个模块处理keys相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#generic
-///
 #[derive(Debug)]
 pub struct DEL<'a> {
     pub keys: Vec<&'a Vec<u8>>

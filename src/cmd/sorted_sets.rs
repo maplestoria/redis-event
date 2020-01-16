@@ -1,11 +1,17 @@
+/*!
+Sorted Sets相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#sorted_set
+*/
+
 use std::slice::Iter;
 
 use crate::cmd::sorted_sets::AGGREGATE::{MAX, MIN, SUM};
 use crate::cmd::strings::ExistType;
 use crate::cmd::strings::ExistType::{NX, XX};
 
-/// 这个模块处理sorted sets相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#sorted_set
 #[derive(Debug)]
 pub struct ZADD<'a> {
     pub key: &'a [u8],

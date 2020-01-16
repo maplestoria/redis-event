@@ -1,10 +1,15 @@
+/*!
+Lists相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#list
+*/
+
 use std::slice::Iter;
 
 use crate::cmd::lists::POSITION::{AFTER, BEFORE};
 
-/// 这个模块处理lists相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#list
-///
 #[derive(Debug)]
 pub struct BRPOPLPUSH<'a> {
     pub source: &'a [u8],

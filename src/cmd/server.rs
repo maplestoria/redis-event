@@ -1,8 +1,13 @@
+/*!
+Server相关的命令定义、解析
+
+所有涉及到的命令参考[Redis Command Reference]
+
+[Redis Command Reference]: https://redis.io/commands#server
+*/
+
 use std::slice::Iter;
 
-/// 这个模块处理server相关的命令
-/// 所有涉及到的命令参考https://redis.io/commands#server
-///
 #[derive(Debug)]
 pub struct FLUSHDB {
     pub _async: Option<bool>
