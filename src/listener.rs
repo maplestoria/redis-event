@@ -10,10 +10,11 @@
 */
 pub mod standalone {
     use std::borrow::Borrow;
-    use std::io::Result;
+    use std::io::{ErrorKind, Result};
     use std::net::TcpStream;
     use std::result::Result::Ok;
-    use std::sync::{mpsc, Arc};
+    use std::sync::{Arc, mpsc};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
@@ -25,7 +26,6 @@ pub mod standalone {
     use crate::io::{Conn, send};
     use crate::rdb::Data;
     use crate::rdb::Data::Bytes;
-    use std::sync::atomic::{AtomicBool, Ordering};
     
     /// 用于监听单个Redis实例的事件
     pub struct Listener {
@@ -35,12 +35,16 @@ pub mod standalone {
         cmd_listener: Box<dyn CommandHandler>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
-        running: Arc<AtomicBool>
+        running: Arc<AtomicBool>,
     }
     
     impl Listener {
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
+            stream.set_read_timeout(Option::Some(Duration::from_millis(self.config.read_timeout)))
+                .expect("read timeout set failed");
+            stream.set_write_timeout(Option::Some(Duration::from_millis(self.config.write_timeout)))
+                .expect("write timeout set failed");
             info!("connected to server {}", self.config.addr.to_string());
             self.conn = Option::Some(io::new(stream));
             Ok(())
@@ -145,7 +149,7 @@ pub mod standalone {
             }
             return cmd;
         }
-    
+        
         fn start_heartbeat(&mut self) {
             let conn = self.conn.as_ref().unwrap();
             let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
@@ -155,7 +159,7 @@ pub mod standalone {
             let mut stream_clone = stream.try_clone().unwrap();
             
             let (sender, receiver) = mpsc::channel();
-        
+            
             let t = thread::spawn(move || {
                 let mut offset = 0;
                 let mut timer = Instant::now();
@@ -203,6 +207,9 @@ pub mod standalone {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
                     Ok(Data::BytesVec(data)) => cmd::parse(data, self.cmd_listener.as_mut()),
+                    Err(ref err) if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut => {
+                        // 不管，连接是好的
+                    }
                     Err(err) => return Err(err),
                     Ok(Data::Empty) => {}
                 }
@@ -237,7 +244,7 @@ pub mod standalone {
             cmd_listener: Box::new(NoOpCommandHandler {}),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
-            running
+            running,
         }
     }
     

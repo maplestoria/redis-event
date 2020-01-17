@@ -18,4 +18,8 @@ pub struct Config {
     pub repl_id: String,
     /// Replication Offset
     pub repl_offset: i64,
+    /// Read Timeout
+    pub read_timeout: u64,
+    /// Write Timeout
+    pub write_timeout: u64,
 }

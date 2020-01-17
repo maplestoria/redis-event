@@ -569,6 +569,8 @@ fn test_aof() {
             password: String::from("123456"),
             repl_id: String::from("?"),
             repl_offset: -1,
+            read_timeout: 100,
+            write_timeout: 100
         };
         let running = Arc::new(AtomicBool::new(true));
         let mut redis_listener = standalone::new(conf, running);
@@ -615,6 +617,8 @@ fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Bo
         password: String::new(),
         repl_id: String::from("?"),
         repl_offset: -1,
+        read_timeout: 100,
+        write_timeout: 100
     };
     let running = Arc::new(AtomicBool::new(true));
     let mut redis_listener = standalone::new(conf, running);
