@@ -28,7 +28,7 @@ pub mod standalone {
     
     /// 用于监听单个Redis实例的事件
     pub struct Listener {
-        config: Config,
+        pub config: Config,
         conn: Option<Conn>,
         rdb_listener: Box<dyn RdbHandler>,
         cmd_listener: Box<dyn CommandHandler>,
@@ -40,40 +40,6 @@ pub mod standalone {
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
             info!("connected to server {}", self.config.addr.to_string());
-            let mut stream_boxed = stream.try_clone();
-            let stream = stream;
-            let (sender, receiver) = mpsc::channel();
-            
-            let t = thread::spawn(move || {
-                let mut offset = 0;
-                let output = stream_boxed.as_mut().unwrap();
-                let mut timer = Instant::now();
-                let half_sec = Duration::from_millis(500);
-                info!("heartbeat thread started");
-                loop {
-                    match receiver.recv_timeout(half_sec) {
-                        Ok(Message::Terminate) => break,
-                        Ok(Message::Some(new_offset)) => {
-                            offset = new_offset;
-                        }
-                        Err(_) => {}
-                    };
-                    let elapsed = timer.elapsed();
-                    if elapsed.ge(&half_sec) {
-                        let offset_str = offset.to_string();
-                        let offset_bytes = offset_str.as_bytes();
-                        if let Err(error) = send(output, b"REPLCONF", &[b"ACK", offset_bytes]) {
-                            error!("heartbeat error: {}", error);
-                            break;
-                        }
-                        timer = Instant::now();
-                    }
-                }
-                info!("heartbeat thread terminated");
-            });
-            
-            self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
-            self.sender = Some(sender);
             self.conn = Option::Some(io::new(stream));
             Ok(())
         }
@@ -177,6 +143,46 @@ pub mod standalone {
             }
             return cmd;
         }
+    
+        fn start_heartbeat(&mut self) {
+            let conn = self.conn.as_ref().unwrap();
+            let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
+                Some(stream) => stream,
+                None => panic!("not tcp stream")
+            };
+            let mut stream_clone = stream.try_clone().unwrap();
+            
+            let (sender, receiver) = mpsc::channel();
+        
+            let t = thread::spawn(move || {
+                let mut offset = 0;
+                let mut timer = Instant::now();
+                let half_sec = Duration::from_millis(500);
+                info!("heartbeat thread started");
+                loop {
+                    match receiver.recv_timeout(half_sec) {
+                        Ok(Message::Terminate) => break,
+                        Ok(Message::Some(new_offset)) => {
+                            offset = new_offset;
+                        }
+                        Err(_) => {}
+                    };
+                    let elapsed = timer.elapsed();
+                    if elapsed.ge(&half_sec) {
+                        let offset_str = offset.to_string();
+                        let offset_bytes = offset_str.as_bytes();
+                        if let Err(error) = send(&mut stream_clone, b"REPLCONF", &[b"ACK", offset_bytes]) {
+                            error!("heartbeat error: {}", error);
+                            break;
+                        }
+                        timer = Instant::now();
+                    }
+                }
+                info!("heartbeat thread terminated");
+            });
+            self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
+            self.sender = Some(sender);
+        }
     }
     
     impl RedisListener for Listener {
@@ -190,6 +196,7 @@ pub mod standalone {
             if !self.config.is_aof {
                 return Ok(());
             }
+            self.start_heartbeat();
             loop {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
