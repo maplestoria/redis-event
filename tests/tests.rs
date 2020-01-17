@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
@@ -569,7 +570,8 @@ fn test_aof() {
             repl_id: String::from("?"),
             repl_offset: -1,
         };
-        let mut redis_listener = standalone::new(conf);
+        let running = Arc::new(AtomicBool::new(true));
+        let mut redis_listener = standalone::new(conf, running);
         redis_listener.set_rdb_listener(Box::new(NoOpRdbHandler {}));
         redis_listener.set_command_listener(Box::new(cmd_handler));
         if let Err(_) = redis_listener.open() {
@@ -614,7 +616,8 @@ fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Bo
         repl_id: String::from("?"),
         repl_offset: -1,
     };
-    let mut redis_listener = standalone::new(conf);
+    let running = Arc::new(AtomicBool::new(true));
+    let mut redis_listener = standalone::new(conf, running);
     redis_listener.set_rdb_listener(rdb_handler);
     redis_listener.set_command_listener(cmd_handler);
     if let Err(error) = redis_listener.open() {

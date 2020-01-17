@@ -13,7 +13,7 @@ pub mod standalone {
     use std::io::Result;
     use std::net::TcpStream;
     use std::result::Result::Ok;
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc};
     use std::thread;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
@@ -25,6 +25,7 @@ pub mod standalone {
     use crate::io::{Conn, send};
     use crate::rdb::Data;
     use crate::rdb::Data::Bytes;
+    use std::sync::atomic::{AtomicBool, Ordering};
     
     /// 用于监听单个Redis实例的事件
     pub struct Listener {
@@ -34,6 +35,7 @@ pub mod standalone {
         cmd_listener: Box<dyn CommandHandler>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
+        running: Arc<AtomicBool>
     }
     
     impl Listener {
@@ -197,7 +199,7 @@ pub mod standalone {
                 return Ok(());
             }
             self.start_heartbeat();
-            loop {
+            while self.running.load(Ordering::Relaxed) {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
                     Ok(Data::BytesVec(data)) => cmd::parse(data, self.cmd_listener.as_mut()),
@@ -205,6 +207,7 @@ pub mod standalone {
                     Ok(Data::Empty) => {}
                 }
             }
+            Ok(())
         }
     }
     
@@ -222,7 +225,11 @@ pub mod standalone {
     }
     
     /// Listener实例的创建方法
-    pub fn new(conf: Config) -> Listener {
+    pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
+        if conf.is_aof && !running.load(Ordering::Relaxed) {
+            running.store(true, Ordering::Relaxed);
+        }
+        
         Listener {
             config: conf,
             conn: Option::None,
@@ -230,6 +237,7 @@ pub mod standalone {
             cmd_listener: Box::new(NoOpCommandHandler {}),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
+            running
         }
     }
     
