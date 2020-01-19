@@ -7,16 +7,15 @@ use std::io::{Cursor, Read, Result};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use log::info;
 
-use crate::{CommandHandler, RdbHandler, to_string};
+use crate::{Event, EventHandler, to_string};
 use crate::io::Conn;
 use crate::rdb::Data::Empty;
 
 // 读取、解析rdb
 pub(crate) fn parse(input: &mut Conn,
                     _: isize,
-                    mut rdb_handlers: &mut RefMut<dyn RdbHandler>,
-                    _: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    rdb_handlers.handle(Object::BOR);
+                    mut event_handler: &mut RefMut<dyn EventHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+    event_handler.handle(Event::RDB(Object::BOR));
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
     input.read_exact(&mut bytes)?;
@@ -65,16 +64,16 @@ pub(crate) fn parse(input: &mut Conn,
                         let val = input.read_u8()?;
                         let value_type = input.read_u8()?;
                         meta.evict = Option::Some((EvictType::LFU, val as i64));
-                        input.read_object(value_type, &mut rdb_handlers, &meta)?;
+                        input.read_object(value_type, &mut event_handler, &meta)?;
                     }
                     RDB_OPCODE_IDLE => {
                         let (val, _) = input.read_length()?;
                         let value_type = input.read_u8()?;
                         meta.evict = Option::Some((EvictType::LRU, val as i64));
-                        input.read_object(value_type, &mut rdb_handlers, &meta)?;
+                        input.read_object(value_type, &mut event_handler, &meta)?;
                     }
                     _ => {
-                        input.read_object(value_type, &mut rdb_handlers, &meta)?;
+                        input.read_object(value_type, &mut event_handler, &meta)?;
                     }
                 }
             }
@@ -82,13 +81,13 @@ pub(crate) fn parse(input: &mut Conn,
                 let val = input.read_u8()?;
                 let value_type = input.read_u8()?;
                 meta.evict = Option::Some((EvictType::LFU, val as i64));
-                input.read_object(value_type, &mut rdb_handlers, &meta)?;
+                input.read_object(value_type, &mut event_handler, &meta)?;
             }
             RDB_OPCODE_IDLE => {
                 let (val, _) = input.read_length()?;
                 meta.evict = Option::Some((EvictType::LRU, val as i64));
                 let value_type = input.read_u8()?;
-                input.read_object(value_type, &mut rdb_handlers, &meta)?;
+                input.read_object(value_type, &mut event_handler, &meta)?;
             }
             RDB_OPCODE_MODULE_AUX => {
                 // TODO
@@ -101,11 +100,11 @@ pub(crate) fn parse(input: &mut Conn,
                 break;
             }
             _ => {
-                input.read_object(data_type, &mut rdb_handlers, &meta)?;
+                input.read_object(data_type, &mut event_handler, &meta)?;
             }
         };
     };
-    rdb_handlers.handle(Object::EOR);
+    event_handler.handle(Event::RDB(Object::EOR));
     Ok(Empty)
 }
 

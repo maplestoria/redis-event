@@ -14,26 +14,15 @@ cache: cargo
 
 rust:
   - stable
-  - beta
-  - nightly
-
-matrix:
-  allow_failures:
-    - rust: nightly
 
 before_cache: |
-  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
-    cargo install cargo-tarpaulin
-  fi
+  cargo install cargo-tarpaulin
 
 script:
   - cargo clean
   - cargo build
-  - cargo test -- --nocapture
+  - cargo tarpaulin --out Xml
 
 after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
     # create and upload a report for codecov.io
-    cargo tarpaulin --out Xml
     bash <(curl -s https://codecov.io/bash)
-  fi

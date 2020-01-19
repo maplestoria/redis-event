@@ -23,7 +23,7 @@ pub mod standalone {
     
     use log::{error, info};
     
-    use crate::{cmd, CommandHandler, io, NoOpCommandHandler, NoOpRdbHandler, rdb, RdbHandler, RedisListener, to_string};
+    use crate::{cmd, EventHandler, io, NoOpEventHandler, rdb, RedisListener, to_string};
     use crate::config::Config;
     use crate::io::{Conn, send};
     use crate::rdb::Data;
@@ -33,8 +33,7 @@ pub mod standalone {
     pub struct Listener {
         pub config: Config,
         conn: Option<Conn>,
-        rdb_listener: Rc<RefCell<dyn RdbHandler>>,
-        cmd_listener: Rc<RefCell<dyn CommandHandler>>,
+        event_handler: Rc<RefCell<dyn EventHandler>>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
         running: Arc<AtomicBool>,
@@ -43,9 +42,9 @@ pub mod standalone {
     impl Listener {
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
-            stream.set_read_timeout(Option::Some(Duration::from_millis(self.config.read_timeout)))
+            stream.set_read_timeout(self.config.read_timeout)
                 .expect("read timeout set failed");
-            stream.set_write_timeout(Option::Some(Duration::from_millis(self.config.write_timeout)))
+            stream.set_write_timeout(self.config.write_timeout)
                 .expect("write timeout set failed");
             info!("connected to server {}", self.config.addr.to_string());
             self.conn = Option::Some(io::new(stream));
@@ -56,9 +55,8 @@ pub mod standalone {
             if !self.config.password.is_empty() {
                 let conn = self.conn.as_mut().unwrap();
                 conn.send(b"AUTH", &[self.config.password.as_bytes()])?;
-                let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
-                let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
-                conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener)?;
+                let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
+                conn.reply(io::read_bytes, &mut event_handler)?;
             }
             Ok(())
         }
@@ -72,18 +70,13 @@ pub mod standalone {
             let port = stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
             conn.send(b"REPLCONF", &[b"listening-port", port])?;
-            let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
-            let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
-            conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener)?;
+            let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
+            conn.reply(io::read_bytes, &mut event_handler)?;
             Ok(())
         }
         
-        pub fn set_rdb_listener(&mut self, listener: Rc<RefCell<dyn RdbHandler>>) {
-            self.rdb_listener = listener
-        }
-        
-        pub fn set_command_listener(&mut self, listener: Rc<RefCell<dyn CommandHandler>>) {
-            self.cmd_listener = listener
+        pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
+            self.event_handler = handler
         }
         
         fn start_sync(&mut self) -> Result<bool> {
@@ -93,15 +86,14 @@ pub mod standalone {
             
             let conn = self.conn.as_mut().unwrap();
             conn.send(b"PSYNC", &[repl_id, repl_offset])?;
-            let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
-            let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
-            if let Bytes(resp) = conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener)? {
+            let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
+            if let Bytes(resp) = conn.reply(io::read_bytes, &mut event_handler)? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
                     if self.config.is_discard_rdb {
-                        conn.reply(io::skip, &mut rdb_handler, &mut cmd_listener)?;
+                        conn.reply(io::skip, &mut event_handler)?;
                     } else {
-                        conn.reply(rdb::parse, &mut rdb_handler, &mut cmd_listener)?;
+                        conn.reply(rdb::parse, &mut event_handler)?;
                     }
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
@@ -134,9 +126,9 @@ pub mod standalone {
                     // 不支持PSYNC命令，改用SYNC命令
                     conn.send(b"SYNC", &Vec::new())?;
                     if self.config.is_discard_rdb {
-                        conn.reply(io::skip, &mut rdb_handler, &mut cmd_listener)?;
+                        conn.reply(io::skip, &mut event_handler)?;
                     } else {
-                        conn.reply(rdb::parse, &mut rdb_handler, &mut cmd_listener)?;
+                        conn.reply(rdb::parse, &mut event_handler)?;
                     }
                     return Ok(true);
                 }
@@ -148,9 +140,8 @@ pub mod standalone {
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             let conn = self.conn.as_mut().unwrap();
             conn.mark();
-            let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
-            let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
-            let cmd = conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener);
+            let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
+            let cmd = conn.reply(io::read_bytes, &mut event_handler);
             let read_len = conn.unmark()?;
             self.config.repl_offset += read_len;
             if let Err(error) = self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)) {
@@ -216,9 +207,9 @@ pub mod standalone {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
                     Ok(Data::BytesVec(data)) => {
-                        let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
-                        cmd::parse(data, &mut cmd_listener);
-                    },
+                        let mut handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
+                        cmd::parse(data, &mut handler);
+                    }
                     Err(ref err) if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut => {
                         // 不管，连接是好的
                     }
@@ -252,8 +243,7 @@ pub mod standalone {
         Listener {
             config: conf,
             conn: Option::None,
-            rdb_listener: Rc::new(RefCell::new(NoOpRdbHandler {})),
-            cmd_listener: Rc::new(RefCell::new(NoOpCommandHandler {})),
+            event_handler: Rc::new(RefCell::new(NoOpEventHandler {})),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
             running,

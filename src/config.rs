@@ -2,6 +2,7 @@
 定义`[RedisListener]`所需的各项配置信息
 */
 use std::net::SocketAddr;
+use std::time::Duration;
 
 /// 配置信息结构体定义
 #[derive(Debug)]
@@ -19,7 +20,7 @@ pub struct Config {
     /// Replication Offset
     pub repl_offset: i64,
     /// Read Timeout
-    pub read_timeout: u64,
+    pub read_timeout: Option<Duration>,
     /// Write Timeout
-    pub write_timeout: u64,
+    pub write_timeout: Option<Duration>,
 }

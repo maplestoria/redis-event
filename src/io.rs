@@ -11,7 +11,7 @@ use std::net::TcpStream;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::{CommandHandler, io, lzf, RdbHandler, to_string};
+use crate::{Event, EventHandler, io, lzf, to_string};
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::*;
 use crate::rdb::Data::{Bytes, BytesVec, Empty};
@@ -50,10 +50,8 @@ pub(crate) fn new(input: TcpStream) -> Conn {
 impl Conn {
     pub(crate) fn reply(&mut self,
                         func: fn(&mut Conn, isize,
-                                 &mut RefMut<dyn RdbHandler>,
-                                 &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
-                        rdb_handler: &mut RefMut<dyn RdbHandler>,
-                        cmd_handler: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                                 &mut RefMut<dyn EventHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
+                        event_handler: &mut RefMut<dyn EventHandler>, ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
         loop {
             let response_type = self.read_u8()?;
             match response_type {
@@ -96,7 +94,7 @@ impl Conn {
                     if byte == LF {
                         let length = to_string(bytes);
                         let length = length.parse::<isize>().unwrap();
-                        return func(self, length, rdb_handler, cmd_handler);
+                        return func(self, length, event_handler);
                     } else {
                         panic!("Expect LF after CR");
                     }
@@ -120,7 +118,7 @@ impl Conn {
                         } else {
                             let mut result = Vec::with_capacity(length as usize);
                             for _ in 0..length {
-                                match self.reply(io::read_bytes, rdb_handler, cmd_handler)? {
+                                match self.reply(io::read_bytes, event_handler)? {
                                     Bytes(resp) => {
                                         result.push(resp);
                                     }
@@ -307,13 +305,13 @@ impl Conn {
     
     // 根据传入的数据类型，从流中读取对应类型的数据
     pub(crate) fn read_object(&mut self, value_type: u8,
-                              rdb_handlers: &mut RefMut<dyn RdbHandler>,
+                              event_handler: &mut RefMut<dyn EventHandler>,
                               meta: &Meta) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
                 let key = self.read_string()?;
                 let value = self.read_string()?;
-                rdb_handlers.handle(Object::String(KeyValue { key: &key, value: &value, meta }));
+                event_handler.handle(Event::RDB(Object::String(KeyValue { key: &key, value: &value, meta })));
             }
             RDB_TYPE_LIST | RDB_TYPE_SET => {
                 let key = self.read_string()?;
@@ -332,9 +330,9 @@ impl Conn {
                         }
                     }
                     if value_type == RDB_TYPE_LIST {
-                        rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
+                        event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
                     } else {
-                        rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
+                        event_handler.handle(Event::RDB(Object::Set(Set { key: &key, members: &val, meta })));
                     }
                 }
             }
@@ -354,7 +352,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -373,7 +371,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
                 }
             }
             RDB_TYPE_HASH => {
@@ -396,7 +394,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &val, meta })));
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -417,7 +415,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &fields, meta }));
+                    event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &fields, meta })));
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
@@ -440,7 +438,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
                 }
             }
             RDB_TYPE_HASH_ZIPLIST => {
@@ -467,7 +465,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Hash(Hash { key: &key, fields: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &val, meta })));
                 }
             }
             RDB_TYPE_ZSET_ZIPLIST => {
@@ -496,7 +494,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::SortedSet(SortedSet { key: &key, items: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -518,7 +516,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::Set(Set { key: &key, members: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::Set(Set { key: &key, members: &val, meta })));
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
@@ -537,7 +535,7 @@ impl Conn {
                             break;
                         }
                     }
-                    rdb_handlers.handle(Object::List(List { key: &key, values: &val, meta }));
+                    event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
                 }
             }
             RDB_TYPE_MODULE => {
@@ -580,8 +578,7 @@ pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> 
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
 pub(crate) fn read_bytes(input: &mut Conn, length: isize,
-                         _: &mut RefMut<dyn RdbHandler>,
-                         _: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                         _: &mut RefMut<dyn EventHandler>, ) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {
         let mut bytes = vec![0; length as usize];
         input.read_exact(&mut bytes)?;
@@ -605,8 +602,7 @@ pub(crate) fn read_bytes(input: &mut Conn, length: isize,
 // 跳过rdb的字节
 pub(crate) fn skip(input: &mut Conn,
                    length: isize,
-                   _: &mut RefMut<dyn RdbHandler>,
-                   _: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                   _: &mut RefMut<dyn EventHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     std::io::copy(&mut input.input.as_mut().take(length as u64), &mut std::io::sink())?;
     Ok(Data::Empty)
 }

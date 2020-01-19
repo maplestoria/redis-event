@@ -22,26 +22,19 @@ pub trait RedisListener {
     fn open(&mut self) -> Result<()>;
 }
 
-/// 定义redis rdb事件的处理接口
-pub trait RdbHandler {
-    fn handle(&mut self, data: Object);
+pub enum Event<'a> {
+    RDB(Object<'a>),
+    AOF(Command<'a>),
 }
 
-pub struct NoOpRdbHandler {}
-
-impl RdbHandler for NoOpRdbHandler {
-    fn handle(&mut self, _: Object) {}
+pub trait EventHandler {
+    fn handle(&mut self, event: Event);
 }
 
-/// 定义redis命令的处理接口
-pub trait CommandHandler {
-    fn handle(&mut self, cmd: Command);
-}
+pub struct NoOpEventHandler {}
 
-pub struct NoOpCommandHandler {}
-
-impl CommandHandler for NoOpCommandHandler {
-    fn handle(&mut self, _: Command) {}
+impl EventHandler for NoOpEventHandler {
+    fn handle(&mut self, _: Event) {}
 }
 
 /// 转换为utf-8字符串，不验证正确性
