@@ -1,8 +1,10 @@
 use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::process::Command;
+use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
@@ -40,7 +42,7 @@ fn test_hash() {
         }
     }
     
-    start_redis_test("dictionary.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+    start_redis_test("dictionary.rdb", Rc::new(RefCell::new(TestRdbHandler {})), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -69,7 +71,7 @@ fn test_hash_1() {
         }
     }
     
-    start_redis_test("hash_as_ziplist.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+    start_redis_test("hash_as_ziplist.rdb", Rc::new(RefCell::new(TestRdbHandler {})), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -90,7 +92,7 @@ fn test_string() {
         }
     }
     
-    start_redis_test("easily_compressible_string_key.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+    start_redis_test("easily_compressible_string_key.rdb", Rc::new(RefCell::new(TestRdbHandler {})), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -120,7 +122,7 @@ fn test_integer() {
         }
     }
     
-    start_redis_test("integer_keys.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("integer_keys.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -152,7 +154,7 @@ fn test_intset16() {
             }
         }
     }
-    start_redis_test("intset_16.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("intset_16.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -184,7 +186,7 @@ fn test_intset32() {
             }
         }
     }
-    start_redis_test("intset_32.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("intset_32.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -216,7 +218,7 @@ fn test_intset64() {
             }
         }
     }
-    start_redis_test("intset_64.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("intset_64.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -242,7 +244,7 @@ fn test_keys_with_expiry() {
             }
         }
     }
-    start_redis_test("keys_with_expiry.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+    start_redis_test("keys_with_expiry.rdb", Rc::new(RefCell::new(TestRdbHandler {})), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -271,7 +273,7 @@ fn test_linked_list() {
             }
         }
     }
-    start_redis_test("linkedlist.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("linkedlist.rdb", Rc::new(RefCell::new(TestRdbHandler { list: vec![] })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -298,7 +300,7 @@ fn test_multiple_database() {
             }
         }
     }
-    start_redis_test("multiple_databases.rdb", Box::new(TestRdbHandler {}), Box::new(NoOpCommandHandler {}));
+    start_redis_test("multiple_databases.rdb", Rc::new(RefCell::new(TestRdbHandler {})), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -330,7 +332,7 @@ fn test_regular_set() {
             }
         }
     }
-    start_redis_test("regular_set.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("regular_set.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -359,7 +361,7 @@ fn test_regular_sorted_set() {
             }
         }
     }
-    start_redis_test("regular_sorted_set.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("regular_sorted_set.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -390,7 +392,7 @@ fn test_zipmap_big_values() {
             }
         }
     }
-    start_redis_test("zipmap_with_big_values.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("zipmap_with_big_values.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -420,7 +422,7 @@ fn test_zipmap_compress() {
             }
         }
     }
-    start_redis_test("zipmap_that_compresses_easily.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("zipmap_that_compresses_easily.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -449,7 +451,7 @@ fn test_zipmap_not_compress() {
             }
         }
     }
-    start_redis_test("zipmap_that_doesnt_compress.rdb", Box::new(TestRdbHandler { map: HashMap::new() }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("zipmap_that_doesnt_compress.rdb", Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -482,7 +484,7 @@ fn test_ziplist() {
             }
         }
     }
-    start_redis_test("ziplist_that_compresses_easily.rdb", Box::new(TestRdbHandler { list: vec![] }), Box::new(NoOpCommandHandler {}));
+    start_redis_test("ziplist_that_compresses_easily.rdb", Rc::new(RefCell::new(TestRdbHandler { list: vec![] })), Rc::new(RefCell::new(NoOpCommandHandler {})));
 }
 
 #[test]
@@ -570,12 +572,12 @@ fn test_aof() {
             repl_id: String::from("?"),
             repl_offset: -1,
             read_timeout: 100,
-            write_timeout: 100
+            write_timeout: 100,
         };
         let running = Arc::new(AtomicBool::new(true));
         let mut redis_listener = standalone::new(conf, running);
-        redis_listener.set_rdb_listener(Box::new(NoOpRdbHandler {}));
-        redis_listener.set_command_listener(Box::new(cmd_handler));
+        redis_listener.set_rdb_listener(Rc::new(RefCell::new(NoOpRdbHandler {})));
+        redis_listener.set_command_listener(Rc::new(RefCell::new(cmd_handler)));
         if let Err(_) = redis_listener.open() {
             println!("redis-server closed");
         }
@@ -603,7 +605,7 @@ fn test_aof() {
     assert_eq!(9, *cmd_count.lock().unwrap().deref());
 }
 
-fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Box<dyn CommandHandler>) {
+fn start_redis_test(rdb: &str, rdb_handler: Rc<RefCell<dyn RdbHandler>>, cmd_handler: Rc<RefCell<dyn CommandHandler>>) {
     let port: u16 = 16379;
     let pid = start_redis_server(rdb, port);
     // wait redis to start
@@ -618,7 +620,7 @@ fn start_redis_test(rdb: &str, rdb_handler: Box<dyn RdbHandler>, cmd_handler: Bo
         repl_id: String::from("?"),
         repl_offset: -1,
         read_timeout: 100,
-        write_timeout: 100
+        write_timeout: 100,
     };
     let running = Arc::new(AtomicBool::new(true));
     let mut redis_listener = standalone::new(conf, running);

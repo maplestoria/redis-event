@@ -10,8 +10,10 @@
 */
 pub mod standalone {
     use std::borrow::Borrow;
+    use std::cell::{RefCell, RefMut};
     use std::io::{ErrorKind, Result};
     use std::net::TcpStream;
+    use std::rc::Rc;
     use std::result::Result::Ok;
     use std::sync::{Arc, mpsc};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,8 +33,8 @@ pub mod standalone {
     pub struct Listener {
         pub config: Config,
         conn: Option<Conn>,
-        rdb_listener: Box<dyn RdbHandler>,
-        cmd_listener: Box<dyn CommandHandler>,
+        rdb_listener: Rc<RefCell<dyn RdbHandler>>,
+        cmd_listener: Rc<RefCell<dyn CommandHandler>>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
         running: Arc<AtomicBool>,
@@ -54,7 +56,9 @@ pub mod standalone {
             if !self.config.password.is_empty() {
                 let conn = self.conn.as_mut().unwrap();
                 conn.send(b"AUTH", &[self.config.password.as_bytes()])?;
-                conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
+                let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
+                conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener)?;
             }
             Ok(())
         }
@@ -68,15 +72,17 @@ pub mod standalone {
             let port = stream.local_addr()?.port().to_string();
             let port = port.as_bytes();
             conn.send(b"REPLCONF", &[b"listening-port", port])?;
-            conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+            let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
+            let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
+            conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener)?;
             Ok(())
         }
         
-        pub fn set_rdb_listener(&mut self, listener: Box<dyn RdbHandler>) {
+        pub fn set_rdb_listener(&mut self, listener: Rc<RefCell<dyn RdbHandler>>) {
             self.rdb_listener = listener
         }
         
-        pub fn set_command_listener(&mut self, listener: Box<dyn CommandHandler>) {
+        pub fn set_command_listener(&mut self, listener: Rc<RefCell<dyn CommandHandler>>) {
             self.cmd_listener = listener
         }
         
@@ -87,14 +93,15 @@ pub mod standalone {
             
             let conn = self.conn.as_mut().unwrap();
             conn.send(b"PSYNC", &[repl_id, repl_offset])?;
-            
-            if let Bytes(resp) = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())? {
+            let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
+            let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
+            if let Bytes(resp) = conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener)? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
                     if self.config.is_discard_rdb {
-                        conn.reply(io::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                        conn.reply(io::skip, &mut rdb_handler, &mut cmd_listener)?;
                     } else {
-                        conn.reply(rdb::parse, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                        conn.reply(rdb::parse, &mut rdb_handler, &mut cmd_listener)?;
                     }
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
@@ -127,9 +134,9 @@ pub mod standalone {
                     // 不支持PSYNC命令，改用SYNC命令
                     conn.send(b"SYNC", &Vec::new())?;
                     if self.config.is_discard_rdb {
-                        conn.reply(io::skip, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                        conn.reply(io::skip, &mut rdb_handler, &mut cmd_listener)?;
                     } else {
-                        conn.reply(rdb::parse, self.rdb_listener.as_mut(), self.cmd_listener.as_mut())?;
+                        conn.reply(rdb::parse, &mut rdb_handler, &mut cmd_listener)?;
                     }
                     return Ok(true);
                 }
@@ -141,7 +148,9 @@ pub mod standalone {
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             let conn = self.conn.as_mut().unwrap();
             conn.mark();
-            let cmd = conn.reply(io::read_bytes, self.rdb_listener.as_mut(), self.cmd_listener.as_mut());
+            let mut rdb_handler: RefMut<dyn RdbHandler> = self.rdb_listener.borrow_mut();
+            let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
+            let cmd = conn.reply(io::read_bytes, &mut rdb_handler, &mut cmd_listener);
             let read_len = conn.unmark()?;
             self.config.repl_offset += read_len;
             if let Err(error) = self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)) {
@@ -206,7 +215,10 @@ pub mod standalone {
             while self.running.load(Ordering::Relaxed) {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                    Ok(Data::BytesVec(data)) => cmd::parse(data, self.cmd_listener.as_mut()),
+                    Ok(Data::BytesVec(data)) => {
+                        let mut cmd_listener: RefMut<dyn CommandHandler> = self.cmd_listener.borrow_mut();
+                        cmd::parse(data, &mut cmd_listener);
+                    },
                     Err(ref err) if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut => {
                         // 不管，连接是好的
                     }
@@ -240,8 +252,8 @@ pub mod standalone {
         Listener {
             config: conf,
             conn: Option::None,
-            rdb_listener: Box::new(NoOpRdbHandler {}),
-            cmd_listener: Box::new(NoOpCommandHandler {}),
+            rdb_listener: Rc::new(RefCell::new(NoOpRdbHandler {})),
+            cmd_listener: Rc::new(RefCell::new(NoOpCommandHandler {})),
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
             running,

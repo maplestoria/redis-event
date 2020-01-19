@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod rdb_tests {
+    use std::cell::{RefCell, RefMut};
     use std::collections::HashMap;
     use std::fs::File;
+    use std::rc::Rc;
     
-    use crate::{io, NoOpCommandHandler, rdb, RdbHandler};
+    use crate::{CommandHandler, io, NoOpCommandHandler, rdb, RdbHandler};
     use crate::rdb::{EvictType, ExpireType, Object};
     
     #[test]
@@ -34,8 +36,13 @@ mod rdb_tests {
                 }
             }
         }
+        let handler = Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() }));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -69,7 +76,12 @@ mod rdb_tests {
             }
         }
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
+        let handler = Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() }));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -102,7 +114,12 @@ mod rdb_tests {
             }
         }
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
+        let handler = Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() }));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -139,7 +156,12 @@ mod rdb_tests {
             }
         }
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler { list: Vec::new() }, &mut NoOpCommandHandler {})
+        let handler = Rc::new(RefCell::new(TestRdbHandler { list: Vec::new() }));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -183,7 +205,12 @@ mod rdb_tests {
             }
         }
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler { map: HashMap::new() }, &mut NoOpCommandHandler {})
+        let handler = Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() }));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -215,7 +242,12 @@ mod rdb_tests {
             }
         }
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -257,7 +289,12 @@ mod rdb_tests {
             }
         }
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
     
@@ -298,18 +335,25 @@ mod rdb_tests {
                 }
             }
         }
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
         
-        rdb::parse(&mut file, 0, &mut TestRdbHandler {}, &mut NoOpCommandHandler {})
+        let cmd_handler = Rc::new(RefCell::new(NoOpCommandHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler, &mut cmd_handler)
             .unwrap();
     }
 }
 
 #[cfg(test)]
 mod aof_tests {
+    use std::cell::{RefCell, RefMut};
     use std::error::Error;
     use std::fs::File;
+    use std::rc::Rc;
     
-    use crate::{cmd, CommandHandler, io, NoOpRdbHandler};
+    use crate::{cmd, CommandHandler, io, NoOpRdbHandler, RdbHandler};
     use crate::cmd::Command;
     use crate::rdb::Data;
     
@@ -356,12 +400,16 @@ mod aof_tests {
             }
         }
         
-        let mut handler = TestCmdHandler {};
+        let handler = Rc::new(RefCell::new(NoOpRdbHandler {}));
+        let mut rdb_handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        
+        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler {}));
+        let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
         
         loop {
-            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+            match file.reply(io::read_bytes, &mut rdb_handler, &mut cmd_handler) {
                 Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
                     if "failed to fill whole buffer".eq(err.description()) {
@@ -395,12 +443,17 @@ mod aof_tests {
             }
         }
         
-        let mut handler = TestCmdHandler { count: 0 };
+        let handler = Rc::new(RefCell::new(NoOpRdbHandler {}));
+        let mut rdb_handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
+        
+        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler { count: 0 }));
         
         loop {
-            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+            let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+    
+            match file.reply(io::read_bytes, &mut rdb_handler, &mut cmd_handler) {
                 Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
                     if "failed to fill whole buffer".eq(err.description()) {
@@ -413,7 +466,7 @@ mod aof_tests {
             }
         }
         
-        assert_eq!(48000, handler.count);
+        assert_eq!(48000, cmd_handler.borrow().count);
     }
     
     #[test]
@@ -431,12 +484,15 @@ mod aof_tests {
             }
         }
         
-        let mut handler = TestCmdHandler { count: 0 };
+        let handler = Rc::new(RefCell::new(NoOpRdbHandler {}));
+        let mut rdb_handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
         
+        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler { count: 0 }));
         loop {
-            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+            let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+            match file.reply(io::read_bytes, &mut rdb_handler, &mut cmd_handler) {
                 Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
                     if "failed to fill whole buffer".eq(err.description()) {
@@ -448,8 +504,7 @@ mod aof_tests {
                 Ok(Data::Empty) => break
             }
         }
-        
-        assert_eq!(92539, handler.count);
+        assert_eq!(92539, cmd_handler.borrow().count);
     }
     
     #[test]
@@ -467,12 +522,16 @@ mod aof_tests {
             }
         }
         
-        let mut handler = TestCmdHandler { count: 0 };
+        let handler = Rc::new(RefCell::new(NoOpRdbHandler {}));
+        let mut rdb_handler: RefMut<dyn RdbHandler> = handler.borrow_mut();
         
+        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler { count: 0 }));
+    
         loop {
-            match file.reply(io::read_bytes, &mut NoOpRdbHandler {}, &mut handler) {
+            let mut cmd_handler: RefMut<dyn CommandHandler> = cmd_handler.borrow_mut();
+            match file.reply(io::read_bytes, &mut rdb_handler, &mut cmd_handler) {
                 Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut handler),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
                     if "failed to fill whole buffer".eq(err.description()) {
@@ -485,6 +544,6 @@ mod aof_tests {
             }
         }
         
-        assert_eq!(71, handler.count);
+        assert_eq!(71, cmd_handler.borrow().count);
     }
 }

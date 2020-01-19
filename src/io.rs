@@ -3,6 +3,7 @@
 */
 
 use std::any::Any;
+use std::cell::RefMut;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::fs::File;
 use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
@@ -49,10 +50,10 @@ pub(crate) fn new(input: TcpStream) -> Conn {
 impl Conn {
     pub(crate) fn reply(&mut self,
                         func: fn(&mut Conn, isize,
-                                 &mut dyn RdbHandler,
-                                 &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
-                        rdb_handler: &mut dyn RdbHandler,
-                        cmd_handler: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                                 &mut RefMut<dyn RdbHandler>,
+                                 &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>>,
+                        rdb_handler: &mut RefMut<dyn RdbHandler>,
+                        cmd_handler: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
         loop {
             let response_type = self.read_u8()?;
             match response_type {
@@ -306,7 +307,7 @@ impl Conn {
     
     // 根据传入的数据类型，从流中读取对应类型的数据
     pub(crate) fn read_object(&mut self, value_type: u8,
-                              rdb_handlers: &mut dyn RdbHandler,
+                              rdb_handlers: &mut RefMut<dyn RdbHandler>,
                               meta: &Meta) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
@@ -579,8 +580,8 @@ pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> 
 
 // 当redis响应的数据是Bulk string时，使用此方法读取指定length的字节, 并返回
 pub(crate) fn read_bytes(input: &mut Conn, length: isize,
-                         _: &mut dyn RdbHandler,
-                         _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                         _: &mut RefMut<dyn RdbHandler>,
+                         _: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     if length > 0 {
         let mut bytes = vec![0; length as usize];
         input.read_exact(&mut bytes)?;
@@ -604,8 +605,8 @@ pub(crate) fn read_bytes(input: &mut Conn, length: isize,
 // 跳过rdb的字节
 pub(crate) fn skip(input: &mut Conn,
                    length: isize,
-                   _: &mut dyn RdbHandler,
-                   _: &mut dyn CommandHandler) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+                   _: &mut RefMut<dyn RdbHandler>,
+                   _: &mut RefMut<dyn CommandHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     std::io::copy(&mut input.input.as_mut().take(length as u64), &mut std::io::sink())?;
     Ok(Data::Empty)
 }

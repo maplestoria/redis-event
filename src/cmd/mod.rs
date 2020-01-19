@@ -26,6 +26,7 @@ use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
 use crate::cmd::strings::*;
 use crate::CommandHandler;
+use std::cell::RefMut;
 
 pub mod connection;
 pub mod hashes;
@@ -121,7 +122,7 @@ pub enum Command<'a> {
     ZUNIONSTORE(&'a ZUNIONSTORE<'a>),
 }
 
-pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut dyn CommandHandler) {
+pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut RefMut<dyn CommandHandler>) {
     let mut iter = data.iter();
     if let Some(cmd_name) = iter.next() {
         let cmd_name = String::from_utf8_lossy(cmd_name).to_uppercase();
