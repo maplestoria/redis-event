@@ -8,6 +8,8 @@ use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::fs::File;
 use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
@@ -34,17 +36,18 @@ impl ReadWrite for File {
 
 pub(crate) struct Conn {
     pub(crate) input: Box<dyn ReadWrite>,
+    pub(crate) running: Arc<AtomicBool>,
     len: i64,
     marked: bool,
 }
 
 #[cfg(test)]
 pub(crate) fn from_file(file: File) -> Conn {
-    Conn { input: Box::new(file), len: 0, marked: false }
+    Conn { input: Box::new(file), running: Arc::new(AtomicBool::new(true)), len: 0, marked: false }
 }
 
-pub(crate) fn new(input: TcpStream) -> Conn {
-    Conn { input: Box::new(input), len: 0, marked: false }
+pub(crate) fn new(input: TcpStream, running: Arc<AtomicBool>) -> Conn {
+    Conn { input: Box::new(input), running, len: 0, marked: false }
 }
 
 impl Conn {

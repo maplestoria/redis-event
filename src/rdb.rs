@@ -10,6 +10,7 @@ use log::info;
 use crate::{Event, EventHandler, to_string};
 use crate::io::Conn;
 use crate::rdb::Data::Empty;
+use std::sync::atomic::Ordering;
 
 // 读取、解析rdb
 pub(crate) fn parse(input: &mut Conn,
@@ -30,7 +31,7 @@ pub(crate) fn parse(input: &mut Conn,
         evict: None,
     };
     
-    loop {
+    while input.running.load(Ordering::Relaxed) {
         let data_type = input.read_u8()?;
         match data_type {
             RDB_OPCODE_AUX => {

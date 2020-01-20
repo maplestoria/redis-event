@@ -47,7 +47,7 @@ pub mod standalone {
             stream.set_write_timeout(self.config.write_timeout)
                 .expect("write timeout set failed");
             info!("connected to server {}", self.config.addr.to_string());
-            self.conn = Option::Some(io::new(stream));
+            self.conn = Option::Some(io::new(stream, self.running.clone()));
             Ok(())
         }
         
@@ -151,6 +151,9 @@ pub mod standalone {
         }
         
         fn start_heartbeat(&mut self) {
+            if !self.running.load(Ordering::Relaxed) {
+                return;
+            }
             let conn = self.conn.as_ref().unwrap();
             let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
                 Some(stream) => stream,
