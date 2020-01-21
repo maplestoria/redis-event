@@ -21,7 +21,7 @@ pub mod standalone {
     use std::thread::sleep;
     use std::time::{Duration, Instant};
     
-    use log::{error, info};
+    use log::{error, info, warn};
     
     use crate::{cmd, EventHandler, io, NoOpEventHandler, rdb, RedisListener, to_string};
     use crate::config::Config;
@@ -90,7 +90,9 @@ pub mod standalone {
             if let Bytes(resp) = conn.reply(io::read_bytes, &mut event_handler)? {
                 let resp = to_string(resp);
                 if resp.starts_with("FULLRESYNC") {
+                    info!("Redis全量RDB准备接收, 等待Redis dump完成...");
                     if self.config.is_discard_rdb {
+                        info!("跳过RDB不进行处理");
                         conn.reply(io::skip, &mut event_handler)?;
                     } else {
                         conn.reply(rdb::parse, &mut event_handler)?;
@@ -109,6 +111,7 @@ pub mod standalone {
                     return Ok(true);
                 } else if resp.starts_with("CONTINUE") {
                     // PSYNC 继续之前的offset
+                    info!("PSYNC进度恢复");
                     let mut iter = resp.split_whitespace();
                     if let Some(repl_id) = iter.nth(1) {
                         if !repl_id.eq(&self.config.repl_id) {
@@ -118,14 +121,18 @@ pub mod standalone {
                     return Ok(true);
                 } else if resp.starts_with("NOMASTERLINK") {
                     // redis丢失了master
+                    warn!("{}", resp);
                     return Ok(false);
                 } else if resp.starts_with("LOADING") {
+                    info!("{}", resp);
                     // redis正在启动，加载rdb中
                     return Ok(false);
                 } else {
+                    info!("切换至SYNC模式重试");
                     // 不支持PSYNC命令，改用SYNC命令
                     conn.send(b"SYNC", &Vec::new())?;
                     if self.config.is_discard_rdb {
+                        info!("跳过RDB不进行处理");
                         conn.reply(io::skip, &mut event_handler)?;
                     } else {
                         conn.reply(rdb::parse, &mut event_handler)?;
@@ -151,7 +158,7 @@ pub mod standalone {
         }
         
         fn start_heartbeat(&mut self) {
-            if !self.running.load(Ordering::Relaxed) {
+            if !self.is_running() {
                 return;
             }
             let conn = self.conn.as_ref().unwrap();
@@ -192,6 +199,10 @@ pub mod standalone {
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
             self.sender = Some(sender);
         }
+        
+        fn is_running(&self) -> bool {
+            self.running.load(Ordering::Relaxed)
+        }
     }
     
     impl RedisListener for Listener {
@@ -199,14 +210,14 @@ pub mod standalone {
             self.connect()?;
             self.auth()?;
             self.send_port()?;
-            while !self.start_sync()? {
+            while !self.start_sync()? && self.is_running() {
                 sleep(Duration::from_secs(5));
             }
             if !self.config.is_aof {
                 return Ok(());
             }
             self.start_heartbeat();
-            while self.running.load(Ordering::Relaxed) {
+            while self.is_running() {
                 match self.receive_cmd() {
                     Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
                     Ok(Data::BytesVec(data)) => {
