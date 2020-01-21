@@ -332,10 +332,12 @@ impl Conn {
                             break;
                         }
                     }
-                    if value_type == RDB_TYPE_LIST {
-                        event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
-                    } else {
-                        event_handler.handle(Event::RDB(Object::Set(Set { key: &key, members: &val, meta })));
+                    if !val.is_empty() {
+                        if value_type == RDB_TYPE_LIST {
+                            event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
+                        } else {
+                            event_handler.handle(Event::RDB(Object::Set(Set { key: &key, members: &val, meta })));
+                        }
                     }
                 }
             }
@@ -355,7 +357,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_ZSET_2 => {
@@ -374,7 +378,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_HASH => {
@@ -397,7 +403,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_HASH_ZIPMAP => {
@@ -418,7 +426,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &fields, meta })));
+                    if !fields.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &fields, meta })));
+                    }
                 }
             }
             RDB_TYPE_LIST_ZIPLIST => {
@@ -441,7 +451,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_HASH_ZIPLIST => {
@@ -468,7 +480,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Hash(Hash { key: &key, fields: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_ZSET_ZIPLIST => {
@@ -497,7 +511,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::SortedSet(SortedSet { key: &key, items: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_SET_INTSET => {
@@ -519,7 +535,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::Set(Set { key: &key, members: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Set(Set { key: &key, members: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_LIST_QUICKLIST => {
@@ -538,7 +556,9 @@ impl Conn {
                             break;
                         }
                     }
-                    event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::List(List { key: &key, values: &val, meta })));
+                    }
                 }
             }
             RDB_TYPE_MODULE => {
