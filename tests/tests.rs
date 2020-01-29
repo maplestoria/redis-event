@@ -600,6 +600,7 @@ fn test_aof() {
             match cmd {
                 Event::RDB(_) => {}
                 Event::AOF(cmd) => {
+                    println!("{:?}", cmd);
                     if let Ok(mut count) = self.count.lock() {
                         let c = count.borrow_mut();
                         let c = c.deref_mut();
@@ -682,7 +683,7 @@ fn test_aof() {
             let _: () = redis::cmd("SET").arg("aa").arg("bb").arg("EX").arg("100").arg("XX").query(&mut conn).unwrap();
             let _: () = conn.rpush("list", "hello").unwrap();
             let _: () = redis::cmd("LINSERT").arg("list").arg("BEFORE").arg("hello").arg("world").query(&mut conn).unwrap();
-            let _: () = redis::cmd("SORT").arg(&["list", "ALPHA", "ASC", "LIMIT", "0", "10", "BY", "weight_*", "GET", "nosort"]).query(&mut conn).unwrap();
+            let _: () = redis::cmd("SORT").arg(&["list", "ALPHA", "ASC", "LIMIT", "0", "10", "BY", "weight_*", "GET", "nosort", "STORE", "storelidst"]).query(&mut conn).unwrap();
             let _: () = conn.rpoplpush("list", "destlist").unwrap();
             let _: () = conn.rename_nx("destlist", "destlist2").unwrap();
             let _: () = conn.pexpire("destlist2", 1000).unwrap();
