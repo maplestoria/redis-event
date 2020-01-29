@@ -666,7 +666,7 @@ fn test_aof() {
         let running = Arc::new(AtomicBool::new(true));
         let mut redis_listener = standalone::new(conf, running);
         redis_listener.set_event_handler(Rc::new(RefCell::new(cmd_handler)));
-        if let Err(_) = redis_listener.open() {
+        if let Err(_) = redis_listener.start() {
             println!("redis-server closed");
         }
     });
@@ -682,7 +682,11 @@ fn test_aof() {
             let _: () = redis::cmd("SET").arg("aa").arg("bb").arg("EX").arg("100").arg("XX").query(&mut conn).unwrap();
             let _: () = conn.rpush("list", "hello").unwrap();
             let _: () = redis::cmd("LINSERT").arg("list").arg("BEFORE").arg("hello").arg("world").query(&mut conn).unwrap();
+            let _: () = redis::cmd("SORT").arg(&["list", "ALPHA", "ASC", "LIMIT", "0", "10", "BY", "weight_*", "GET", "nosort"]).query(&mut conn).unwrap();
             let _: () = conn.rpoplpush("list", "destlist").unwrap();
+            let _: () = conn.rename_nx("destlist", "destlist2").unwrap();
+            let _: () = conn.pexpire("destlist2", 1000).unwrap();
+            let _: () = conn.expire_at("list", 1000).unwrap();
             // flush all, end the test
             let _: () = redis::cmd("FLUSHDB").arg("ASYNC").query(&mut conn).unwrap();
             let _: () = redis::cmd("FLUSHALL").arg("ASYNC").query(&mut conn).unwrap();
@@ -692,7 +696,7 @@ fn test_aof() {
         }
     }
     
-    assert_eq!(9, *cmd_count.lock().unwrap().deref());
+    assert_eq!(13, *cmd_count.lock().unwrap().deref());
 }
 
 fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandler>>) {
@@ -714,7 +718,7 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
     let running = Arc::new(AtomicBool::new(true));
     let mut redis_listener = standalone::new(conf, running);
     redis_listener.set_event_handler(rdb_handler);
-    if let Err(error) = redis_listener.open() {
+    if let Err(error) = redis_listener.start() {
         eprintln!("error: {}", error);
         panic!(error)
     }

@@ -8,6 +8,43 @@
 
 [`RedisListener`]: trait.RedisListener.html
 */
+
+/// 此模块针对单节点Redis，实现了`RedisListener`接口
+///
+/// # 示例
+///
+/// ```no_run
+/// use std::net::{IpAddr, SocketAddr};
+/// use std::sync::atomic::AtomicBool;
+/// use std::sync::Arc;
+/// use std::str::FromStr;
+/// use std::rc::Rc;
+/// use std::cell::RefCell;
+/// use redis_event::listener::standalone;
+/// use redis_event::config::Config;
+/// use redis_event::{NoOpEventHandler, RedisListener};
+///
+///
+/// let ip = IpAddr::from_str("127.0.0.1").unwrap();
+/// let port = 6379;
+///
+/// let conf = Config {
+///     is_discard_rdb: false,            // 不跳过RDB
+///     is_aof: false,                    // 不处理AOF
+///     addr: SocketAddr::new(ip, port),
+///     password: String::new(),          // 密码为空
+///     repl_id: String::from("?"),       // replication id，若无此id，设置为?即可
+///     repl_offset: -1,                  // replication offset，若无此offset，设置为-1即可
+///     read_timeout: None,               // None，即读取永不超时
+///     write_timeout: None,              // None，即写入永不超时
+/// };
+/// let running = Arc::new(AtomicBool::new(true));
+/// let mut redis_listener = standalone::new(conf, running);
+/// // 设置事件处理器
+/// redis_listener.set_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
+/// // 启动程序
+/// redis_listener.start()?;
+/// ```
 pub mod standalone {
     use std::borrow::Borrow;
     use std::cell::{RefCell, RefMut};
@@ -40,6 +77,7 @@ pub mod standalone {
     }
     
     impl Listener {
+        /// 连接Redis，创建TCP连接
         fn connect(&mut self) -> Result<()> {
             let stream = TcpStream::connect(self.config.addr)?;
             stream.set_read_timeout(self.config.read_timeout)
@@ -50,7 +88,7 @@ pub mod standalone {
             self.conn = Option::Some(io::new(stream, self.running.clone()));
             Ok(())
         }
-        
+        /// 如果有设置密码，将尝试使用此密码进行认证
         fn auth(&mut self) -> Result<()> {
             if !self.config.password.is_empty() {
                 let conn = self.conn.as_mut().unwrap();
@@ -60,7 +98,7 @@ pub mod standalone {
             }
             Ok(())
         }
-        
+        /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
         fn send_port(&mut self) -> Result<()> {
             let conn = self.conn.as_mut().unwrap();
             let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
@@ -74,11 +112,12 @@ pub mod standalone {
             conn.reply(io::read_bytes, &mut event_handler)?;
             Ok(())
         }
-        
+        /// 设置事件处理器
         pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
             self.event_handler = handler
         }
-        
+        /// 开启replication
+        /// 默认使用PSYNC命令，若不支持PSYNC则尝试使用SYNC命令
         fn start_sync(&mut self) -> Result<bool> {
             let offset = self.config.repl_offset.to_string();
             let repl_offset = offset.as_bytes();
@@ -143,7 +182,7 @@ pub mod standalone {
                 panic!("Expect Redis string response");
             }
         }
-        
+        /// 接收AOF，并处理replication offset发送到心跳线程
         fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
             let conn = self.conn.as_mut().unwrap();
             conn.mark();
@@ -156,7 +195,7 @@ pub mod standalone {
             }
             return cmd;
         }
-        
+        /// 开启心跳
         fn start_heartbeat(&mut self) {
             if !self.is_running() {
                 return;
@@ -199,14 +238,17 @@ pub mod standalone {
             self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
             self.sender = Some(sender);
         }
-        
+        /// 获取当前运行的状态，若为false，程序将有序退出
         fn is_running(&self) -> bool {
             self.running.load(Ordering::Relaxed)
         }
     }
     
     impl RedisListener for Listener {
-        fn open(&mut self) -> Result<()> {
+        /// 程序运行的整体逻辑都在这个方法里面实现
+        ///
+        /// 具体的细节体现在各个方法内
+        fn start(&mut self) -> Result<()> {
             self.connect()?;
             self.auth()?;
             self.send_port()?;
@@ -248,7 +290,7 @@ pub mod standalone {
         }
     }
     
-    /// Listener实例的创建方法
+    /// Listener实例的创建方法。 `running`变量用于在外部中断此crate内部的逻辑，设置为true再传入
     pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
         if conf.is_aof && !running.load(Ordering::Relaxed) {
             running.store(true, Ordering::Relaxed);
@@ -274,6 +316,8 @@ pub mod standalone {
     }
 }
 
+/// TODO implement
 pub mod cluster {}
 
+/// TODO implement
 pub mod sentinel {}

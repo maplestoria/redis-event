@@ -1,5 +1,7 @@
 /*!
-定义`[RedisListener]`所需的各项配置信息
+定义[`RedisListener`]所需的各项配置信息
+
+[`RedisListener`]: trait.RedisListener.html
 */
 use std::net::SocketAddr;
 use std::time::Duration;
