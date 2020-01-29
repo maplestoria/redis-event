@@ -5,7 +5,7 @@
 
 用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用。
 
-# 原理
+## 原理
 
 此crate实现了[Redis Replication协议](https://redis.io/topics/replication)，在运行时，程序将以replica的身份连接到Redis，相当于Redis的一个副本。
 
@@ -13,7 +13,7 @@
 
 在这之后，Redis接收到来自客户端的写入操作(即Redis命令)后，也会将这个写入操作传播给它的replica，每一个写入操作就对应一个`Event::AOF`事件。
 
-# 示例
+## 示例
 
 ```rust
 use std::net::{IpAddr, SocketAddr};
@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::str::FromStr;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::io;
 use redis_event::listener::standalone;
 use redis_event::config::Config;
 use redis_event::{NoOpEventHandler, RedisListener};

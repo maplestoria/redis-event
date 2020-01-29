@@ -3,6 +3,11 @@ name = "redis-event"
 version = "0.1.0"
 authors = ["maplestoria <zkx6648@gmail.com>"]
 edition = "2018"
+description = "用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用"
+homepage = "https://github.com/maplestoria/redis-event"
+documentation = "https://github.com/maplestoria/redis-event"
+repository = "https://github.com/maplestoria/redis-event"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
