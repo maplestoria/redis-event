@@ -5,7 +5,9 @@ authors = ["maplestoria <zkx6648@gmail.com>"]
 edition = "2018"
 description = "用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用"
 homepage = "https://github.com/maplestoria/redis-event"
-documentation = "https://github.com/maplestoria/redis-event"
+documentation = "https://docs.rs/redis-event"
+readme = "README.md"
+keywords = ["redis", "redis-replication", "replication"]
 repository = "https://github.com/maplestoria/redis-event"
 license = "MIT"
 
