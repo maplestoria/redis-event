@@ -48,10 +48,10 @@ redis_listener.start()?;
 [`Event`]: enum.Event.html
 */
 
-use std::io::Result;
+use std::io::{Result, Read};
 
 use crate::cmd::Command;
-use crate::rdb::Object;
+use crate::rdb::{Module, Object};
 
 pub mod cmd;
 pub mod config;
@@ -92,6 +92,11 @@ pub struct NoOpEventHandler {}
 
 impl EventHandler for NoOpEventHandler {
     fn handle(&mut self, _: Event) {}
+}
+
+/// Module Parser
+pub trait ModuleParser {
+    fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module>;
 }
 
 /// 转换为utf-8字符串，不验证正确性

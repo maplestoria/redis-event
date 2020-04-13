@@ -3,10 +3,11 @@ mod rdb_tests {
     use std::cell::{RefCell, RefMut};
     use std::collections::HashMap;
     use std::fs::File;
+    use std::io::Read;
     use std::rc::Rc;
     
-    use crate::{Event, EventHandler, io, rdb};
-    use crate::rdb::{EvictType, ExpireType, Object};
+    use crate::{Event, EventHandler, io, ModuleParser, rdb};
+    use crate::rdb::{EvictType, ExpireType, Module, Object};
     
     #[test]
     fn test_zipmap_not_compress() {
@@ -365,6 +366,86 @@ mod rdb_tests {
         
         rdb::parse(&mut file, 0, &mut handler)
             .unwrap();
+    }
+    
+    #[test]
+    #[should_panic]
+    fn test_module() {
+        let file = File::open("tests/rdb/module.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestModuleParser {}
+        
+        impl ModuleParser for TestModuleParser {
+            fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module> {
+                println!("module_name: [{}] module_version: [{}]", module_name, module_version);
+                unimplemented!();
+            }
+        }
+        
+        let parser = Rc::new(RefCell::new(TestModuleParser {}));
+        file.module_parser = Option::Some(parser);
+        
+        struct TestRdbHandler {}
+        
+        impl EventHandler for TestRdbHandler {
+            fn handle(&mut self, event: Event) {
+                match event {
+                    Event::RDB(rdb) => {
+                        match rdb {
+                            Object::Module(key, module) => {}
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler).unwrap();
+    }
+    
+    #[test]
+    #[should_panic]
+    fn test_module2() {
+        let file = File::open("tests/rdb/dump-module-2.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestModuleParser {}
+        
+        impl ModuleParser for TestModuleParser {
+            fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module> {
+                println!("module_name: [{}] module_version: [{}]", module_name, module_version);
+                unimplemented!();
+            }
+        }
+        
+        let parser = Rc::new(RefCell::new(TestModuleParser {}));
+        file.module_parser = Option::Some(parser);
+        
+        struct TestRdbHandler {}
+        
+        impl EventHandler for TestRdbHandler {
+            fn handle(&mut self, event: Event) {
+                match event {
+                    Event::RDB(rdb) => {
+                        match rdb {
+                            Object::Module(key, module) => {}
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler).unwrap();
     }
 }
 

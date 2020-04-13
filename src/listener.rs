@@ -60,7 +60,7 @@ pub mod standalone {
     
     use log::{error, info, warn};
     
-    use crate::{cmd, EventHandler, io, NoOpEventHandler, rdb, RedisListener, to_string};
+    use crate::{cmd, EventHandler, io, ModuleParser, NoOpEventHandler, rdb, RedisListener, to_string};
     use crate::config::Config;
     use crate::io::{Conn, send};
     use crate::rdb::Data;
@@ -71,6 +71,7 @@ pub mod standalone {
         pub config: Config,
         conn: Option<Conn>,
         event_handler: Rc<RefCell<dyn EventHandler>>,
+        module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
         t_heartbeat: HeartbeatWorker,
         sender: Option<mpsc::Sender<Message>>,
         running: Arc<AtomicBool>,
@@ -85,7 +86,11 @@ pub mod standalone {
             stream.set_write_timeout(self.config.write_timeout)
                 .expect("write timeout set failed");
             info!("connected to server {}", self.config.addr.to_string());
-            self.conn = Option::Some(io::new(stream, self.running.clone()));
+            let mut conn = io::new(stream, self.running.clone());
+            if let Some(parser) = &self.module_parser {
+                conn.module_parser = Option::Some(parser.clone());
+            }
+            self.conn = Option::Some(conn);
             Ok(())
         }
         /// 如果有设置密码，将尝试使用此密码进行认证
@@ -116,6 +121,11 @@ pub mod standalone {
         pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
             self.event_handler = handler
         }
+        
+        pub fn set_module_parser(&mut self, parser: Rc<RefCell<dyn ModuleParser>>) {
+            self.module_parser = Option::Some(parser)
+        }
+        
         /// 开启replication
         /// 默认使用PSYNC命令，若不支持PSYNC则尝试使用SYNC命令
         fn start_sync(&mut self) -> Result<bool> {
@@ -300,6 +310,7 @@ pub mod standalone {
             config: conf,
             conn: Option::None,
             event_handler: Rc::new(RefCell::new(NoOpEventHandler {})),
+            module_parser: None,
             t_heartbeat: HeartbeatWorker { thread: None },
             sender: None,
             running,

@@ -1,8 +1,12 @@
 /*!
 RDB中各项Redis数据相关的结构体定义，以及RDB解析相关的代码在此模块下
 */
+use core::result;
+use std::any::Any;
 use std::cell::RefMut;
+use std::fmt::{Debug, Error, Formatter};
 use std::io::{Cursor, Read, Result};
+use std::sync::atomic::Ordering;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use log::info;
@@ -10,7 +14,6 @@ use log::info;
 use crate::{Event, EventHandler, to_string};
 use crate::io::Conn;
 use crate::rdb::Data::Empty;
-use std::sync::atomic::Ordering;
 
 // 读取、解析rdb
 pub(crate) fn parse(input: &mut Conn,
@@ -91,8 +94,8 @@ pub(crate) fn parse(input: &mut Conn,
                 input.read_object(value_type, &mut event_handler, &meta)?;
             }
             RDB_OPCODE_MODULE_AUX => {
-                // TODO
-                unimplemented!("RDB_OPCODE_MODULE_AUX");
+                input.read_length()?;
+                input.rdb_load_check_module_value()?;
             }
             RDB_OPCODE_EOF => {
                 if rdb_version >= 5 {
@@ -147,32 +150,32 @@ pub(crate) fn read_zip_list_entry(cursor: &mut Cursor<Vec<u8>>) -> Result<Vec<u8
         }
         _ => {}
     }
-    match flag {
+    return match flag {
         ZIP_INT_8BIT => {
             let int = cursor.read_i8()?;
-            return Ok(int.to_string().into_bytes());
+            Ok(int.to_string().into_bytes())
         }
         ZIP_INT_16BIT => {
             let int = cursor.read_i16::<LittleEndian>()?;
-            return Ok(int.to_string().into_bytes());
+            Ok(int.to_string().into_bytes())
         }
         ZIP_INT_24BIT => {
             let int = cursor.read_i24::<LittleEndian>()?;
-            return Ok(int.to_string().into_bytes());
+            Ok(int.to_string().into_bytes())
         }
         ZIP_INT_32BIT => {
             let int = cursor.read_i32::<LittleEndian>()?;
-            return Ok(int.to_string().into_bytes());
+            Ok(int.to_string().into_bytes())
         }
         ZIP_INT_64BIT => {
             let int = cursor.read_i64::<LittleEndian>()?;
-            return Ok(int.to_string().into_bytes());
+            Ok(int.to_string().into_bytes())
         }
         _ => {
             let result = (flag - 0xF1) as isize;
-            return Ok(result.to_string().into_bytes());
+            Ok(result.to_string().into_bytes())
         }
-    }
+    };
 }
 
 /// 封装Redis中的各种数据类型，由`RdbHandler`统一处理
@@ -188,10 +191,21 @@ pub enum Object<'a> {
     SortedSet(SortedSet<'a>),
     /// 代表Redis中的Hash类型数据
     Hash(Hash<'a>),
+    Module(Vec<u8>, Box<dyn Module>),
     /// 代表rdb数据解析开始
     BOR,
     /// 代表rdb数据解析完毕
     EOR,
+}
+
+pub trait Module {
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl Debug for dyn Module {
+    fn fmt(&self, _: &mut Formatter) -> result::Result<(), Error> {
+        unimplemented!()
+    }
 }
 
 /// 数据的元信息, 包括数据过期类型, 内存驱逐类型, 数据所属的db
@@ -340,6 +354,14 @@ pub(crate) const RDB_OPCODE_EXPIRETIME: u8 = 253;
 pub(crate) const RDB_OPCODE_SELECTDB: u8 = 254;
 // End of the RDB file.
 pub(crate) const RDB_OPCODE_EOF: u8 = 255;
+
+pub(crate) const RDB_MODULE_OPCODE_EOF: isize = 0;
+
+pub(crate) const RDB_MODULE_OPCODE_SINT: isize = 1;
+pub(crate) const RDB_MODULE_OPCODE_UINT: isize = 2;
+pub(crate) const RDB_MODULE_OPCODE_STRING: isize = 5;
+pub(crate) const RDB_MODULE_OPCODE_FLOAT: isize = 3;
+pub(crate) const RDB_MODULE_OPCODE_DOUBLE: isize = 4;
 
 pub(crate) const ZIP_INT_8BIT: u8 = 254;
 pub(crate) const ZIP_INT_16BIT: u8 = 192;

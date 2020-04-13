@@ -3,17 +3,19 @@
 */
 
 use std::any::Any;
-use std::cell::RefMut;
+use std::cell::{RefCell, RefMut};
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::fs::File;
 use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
+use std::iter::FromIterator;
 use std::net::TcpStream;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
 
-use crate::{Event, EventHandler, io, lzf, to_string};
+use crate::{Event, EventHandler, io, lzf, ModuleParser, to_string};
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::rdb::*;
 use crate::rdb::Data::{Bytes, BytesVec, Empty};
@@ -37,17 +39,18 @@ impl ReadWrite for File {
 pub(crate) struct Conn {
     pub(crate) input: Box<dyn ReadWrite>,
     pub(crate) running: Arc<AtomicBool>,
+    pub module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
     len: i64,
     marked: bool,
 }
 
 #[cfg(test)]
 pub(crate) fn from_file(file: File) -> Conn {
-    Conn { input: Box::new(file), running: Arc::new(AtomicBool::new(true)), len: 0, marked: false }
+    Conn { input: Box::new(file), running: Arc::new(AtomicBool::new(true)), module_parser: Option::None, len: 0, marked: false }
 }
 
 pub(crate) fn new(input: TcpStream, running: Arc<AtomicBool>) -> Conn {
-    Conn { input: Box::new(input), running, len: 0, marked: false }
+    Conn { input: Box::new(input), running, module_parser: Option::None, len: 0, marked: false }
 }
 
 impl Conn {
@@ -73,12 +76,12 @@ impl Conn {
                     }
                     let byte = self.read_u8()?;
                     if byte == LF {
-                        if response_type == PLUS || response_type == COLON {
-                            return Ok(Bytes(bytes));
+                        return if response_type == PLUS || response_type == COLON {
+                            Ok(Bytes(bytes))
                         } else {
                             let message = to_string(bytes);
-                            return Err(Error::new(ErrorKind::InvalidInput, message));
-                        }
+                            Err(Error::new(ErrorKind::InvalidInput, message))
+                        };
                     } else {
                         panic!("Expect LF after CR");
                     }
@@ -116,8 +119,8 @@ impl Conn {
                     if byte == LF {
                         let length = to_string(bytes);
                         let length = length.parse::<isize>().unwrap();
-                        if length <= 0 {
-                            return Ok(Empty);
+                        return if length <= 0 {
+                            Ok(Empty)
                         } else {
                             let mut result = Vec::with_capacity(length as usize);
                             for _ in 0..length {
@@ -131,8 +134,8 @@ impl Conn {
                                     Empty => panic!("Expect Redis response, but got empty")
                                 }
                             }
-                            return Ok(BytesVec(result));
-                        }
+                            Ok(BytesVec(result))
+                        };
                     } else {
                         panic!("Expect LF after CR");
                     }
@@ -286,24 +289,24 @@ impl Conn {
     // 从流中读取一个double
     pub(crate) fn read_double(&mut self) -> Result<f64> {
         let len = self.read_u8()?;
-        match len {
+        return match len {
             255 => {
-                return Ok(NEG_INFINITY);
+                Ok(NEG_INFINITY)
             }
             254 => {
-                return Ok(INFINITY);
+                Ok(INFINITY)
             }
             253 => {
-                return Ok(NAN);
+                Ok(NAN)
             }
             _ => {
                 let mut buff = vec![0; len as usize];
                 self.read_exact(&mut buff)?;
                 let score_str = to_string(buff);
                 let score = score_str.parse::<f64>().unwrap();
-                return Ok(score);
+                Ok(score)
             }
-        }
+        };
     }
     
     // 根据传入的数据类型，从流中读取对应类型的数据
@@ -561,19 +564,62 @@ impl Conn {
                     }
                 }
             }
-            RDB_TYPE_MODULE => {
-                // TODO
-                unimplemented!("RDB_TYPE_MODULE");
-            }
-            RDB_TYPE_MODULE_2 => {
-                // TODO
-                unimplemented!("RDB_TYPE_MODULE_2");
+            RDB_TYPE_MODULE | RDB_TYPE_MODULE_2 => {
+                let key = self.read_string()?;
+                let (module_id, _) = self.read_length()?;
+                let module_id = module_id as usize;
+                let mut array: [char; 9] = [' '; 9];
+                for i in 0..array.len() {
+                    let i1 = 10 + (array.len() - 1 - i) * 6;
+                    let i2 = (module_id >> i1 as usize) as usize;
+                    let i3 = i2 & 63;
+                    let chr = MODULE_SET.get(i3).unwrap();
+                    array[i] = *chr;
+                }
+                let module_name: String = String::from_iter(array.iter());
+                let module_version: usize = module_id & 1023;
+                if self.module_parser.is_none() && value_type == RDB_TYPE_MODULE {
+                    panic!("MODULE {}, version {} 无法解析", module_name, module_version);
+                }
+                if let Some(parser) = &mut self.module_parser {
+                    let module: Box<dyn Module> = parser.borrow_mut().parse(&mut self.input, &module_name, module_version);
+                    event_handler.handle(Event::RDB(Object::Module(key, module)));
+                    if value_type == RDB_TYPE_MODULE_2 {
+                        let (len, _) = self.read_length()?;
+                        if len != 0 {
+                            panic!("The RDB file contains module data for the module '{}' that is not terminated by the proper module value EOF marker",
+                                   &module_name);
+                        }
+                    }
+                } else {
+                    // 没有parser，并且是Module 2类型的值，那就可以直接跳过了
+                    self.rdb_load_check_module_value()?;
+                }
             }
             RDB_TYPE_STREAM_LISTPACKS => {
                 // TODO
                 unimplemented!("RDB_TYPE_STREAM_LISTPACKS");
             }
             _ => panic!("unknown data type: {}", value_type)
+        }
+        Ok(())
+    }
+    
+    pub(crate) fn rdb_load_check_module_value(&mut self) -> Result<()> {
+        loop {
+            let (op_code, _) = self.read_length()?;
+            if op_code == RDB_MODULE_OPCODE_EOF {
+                break;
+            }
+            if op_code == RDB_MODULE_OPCODE_SINT || op_code == RDB_MODULE_OPCODE_UINT {
+                self.read_length()?;
+            } else if op_code == RDB_MODULE_OPCODE_STRING {
+                self.read_string()?;
+            } else if op_code == RDB_MODULE_OPCODE_FLOAT {
+                self.read_exact(&mut [4; 0])?;
+            } else if op_code == RDB_MODULE_OPCODE_DOUBLE {
+                self.read_exact(&mut [8; 0])?;
+            }
         }
         Ok(())
     }
@@ -612,14 +658,15 @@ pub(crate) fn read_bytes(input: &mut Conn, length: isize,
         } else {
             panic!("Expect CRLF after bulk string, but got: {:?}", end);
         }
-    } else if length == 0 {
+    }
+    return if length == 0 {
         // length == 0 代表空字符，后面还有CRLF
         input.read_exact(&mut [0; 2])?;
-        return Ok(Empty);
+        Ok(Empty)
     } else {
         // length < 0 代表null
-        return Ok(Empty);
-    }
+        Ok(Empty)
+    };
 }
 
 // 跳过rdb的字节
@@ -643,3 +690,8 @@ pub(crate) const PLUS: u8 = b'+';
 pub(crate) const MINUS: u8 = b'-';
 // 代表integer响应
 pub(crate) const COLON: u8 = b':';
+
+pub const MODULE_SET: [char; 64] = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '_'];
