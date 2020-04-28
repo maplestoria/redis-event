@@ -2,6 +2,8 @@
 
 [![Build Status](https://travis-ci.com/maplestoria/redis-event.svg?token=LAWtGewQmwi6dpqV9Qcy&branch=master)](https://travis-ci.com/maplestoria/redis-event)
 [![codecov](https://codecov.io/gh/maplestoria/redis-event/branch/master/graph/badge.svg?token=u9ZqCQjuPi)](https://codecov.io/gh/maplestoria/redis-event)
+[![Crates.io](https://img.shields.io/crates/v/redis-event)](https://crates.io/crates/redis-event)
+![Crates.io](https://img.shields.io/crates/l/redis-event)
 
 用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用。
 
