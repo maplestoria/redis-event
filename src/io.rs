@@ -662,19 +662,80 @@ impl Conn {
                 let seq = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
                     .unwrap();
                 let id = ID { ms: ms + base_id.ms, seq: seq + base_id.seq };
-                let delete = (flag & 1) != 0;
+                let deleted = (flag & 1) != 0;
                 if (flag & 2) != 0 {
                     for i in 0..num_fields {
                         let value = read_list_pack_entry(&mut list_pack)?;
-                        let field: Vec<u8> = tmp_fields.get(i as usize).unwrap().to_vec();
+                        let field = tmp_fields.get(i as usize).unwrap().to_vec();
                         fields.push(Field { name: field, value });
                     }
-                    entries.insert(id, Entry {
-                        id,
-                        deleted: delete,
-                        fields,
-                    });
-                } else {}
+                    entries.insert(id, Entry { id, deleted, fields });
+                } else {
+                    let num_fields = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                        .unwrap();
+                    for _ in 0..num_fields {
+                        let value = read_list_pack_entry(&mut list_pack)?;
+                        let field = read_list_pack_entry(&mut list_pack)?;
+                        fields.push(Field { name: field, value });
+                    }
+                    entries.insert(id, Entry { id, deleted, fields });
+                }
+                read_list_pack_entry(&mut list_pack)?;
+            }
+            let end = list_pack.read_u8()?;
+            if end != 255 {
+                panic!("listpack expect 255 but {}", end);
+            }
+        }
+        let (length, _) = self.read_length()?;
+        let (ms, _) = self.read_length()?;
+        let (seq, _) = self.read_length()?;
+        let last_id = ID { ms: ms as i64, seq: seq as i64 };
+        
+        let groups: Vec<Group> = Vec::new();
+        let (count, _) = self.read_length()?;
+        for _ in 0..count {
+            let name = self.read_string()?;
+            let (ms, _) = self.read_length()?;
+            let (seq, _) = self.read_length()?;
+            let group_last_id = ID { ms: ms as i64, seq: seq as i64 };
+            
+            let mut group_pending_entries: BTreeMap<ID, Nack> = BTreeMap::new();
+            let (global_pel, _) = self.read_length()?;
+            for _ in 0..global_pel {
+                let ms = read_long(&mut self.input, 8, false)?;
+                let seq = read_long(&mut self.input, 8, false)?;
+                let id = ID { ms, seq };
+                let delivery_time = self.read_integer(8, false)?;
+                let delivery_count = self.read_integer(8, false)?;
+                group_pending_entries.insert(id, Nack {
+                    id,
+                    consumer: None,
+                    delivery_time: delivery_time as i64,
+                    delivery_count: delivery_count as i64,
+                });
+            }
+            
+            let mut consumers: Vec<Consumer> = Vec::new();
+            let (consumer_count, _) = self.read_length()?;
+            for _ in 0..consumer_count {
+                let consumer_name = self.read_string()?;
+                let seen_time = self.read_integer(8, false)?;
+                let consumer = Consumer {
+                    name: consumer_name,
+                    seen_time: seen_time as i64,
+                    pending_entries: Default::default(),
+                };
+                
+                let mut consumer_pending_entries: BTreeMap<ID, Nack> = BTreeMap::new();
+                let (pel, _) = self.read_length()?;
+                for _ in 0..pel {
+                    let ms = read_long(&mut self.input, 8, false)?;
+                    let seq = read_long(&mut self.input, 8, false)?;
+                    let id = ID { ms, seq };
+                    let nack = group_pending_entries.get(&id).unwrap();
+                }
+                // todo
             }
         }
         unimplemented!()

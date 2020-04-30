@@ -410,7 +410,7 @@ pub struct Group {
 #[derive(Debug)]
 pub struct Nack {
     pub id: ID,
-    pub consumer: Consumer,
+    pub consumer: Option<Consumer>,
     pub delivery_time: i64,
     pub delivery_count: i64,
 }
