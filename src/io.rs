@@ -648,9 +648,34 @@ impl Conn {
                 .unwrap();
             let mut tmp_fields = Vec::with_capacity(num_fields as usize);
             for _ in 0..num_fields {
-                tmp_fields.push(read_list_pack_entry(&mut list)?);
+                tmp_fields.push(read_list_pack_entry(&mut list_pack)?);
             }
-            read_list_pack_entry(&mut list)?
+            read_list_pack_entry(&mut list_pack)?;
+            
+            let total = count + deleted;
+            for _ in 0..total {
+                let mut fields: Vec<Field> = Vec::with_capacity(total as usize);
+                let flag = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                    .unwrap();
+                let ms = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                    .unwrap();
+                let seq = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                    .unwrap();
+                let id = ID { ms: ms + base_id.ms, seq: seq + base_id.seq };
+                let delete = (flag & 1) != 0;
+                if (flag & 2) != 0 {
+                    for i in 0..num_fields {
+                        let value = read_list_pack_entry(&mut list_pack)?;
+                        let field: Vec<u8> = tmp_fields.get(i as usize).unwrap().to_vec();
+                        fields.push(Field { name: field, value });
+                    }
+                    entries.insert(id, Entry {
+                        id,
+                        deleted: delete,
+                        fields,
+                    });
+                } else {}
+            }
         }
         unimplemented!()
     }

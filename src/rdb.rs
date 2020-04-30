@@ -327,7 +327,7 @@ pub struct Stream {
     pub groups: Vec<Group>,
 }
 
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Copy, Clone)]
 pub struct ID {
     pub ms: i64,
     pub seq: i64,
