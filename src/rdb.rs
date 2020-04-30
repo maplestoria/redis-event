@@ -12,6 +12,8 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use log::info;
 
 use crate::{Event, EventHandler, to_string};
+use crate::cmd::Command;
+use crate::cmd::connection::SELECT;
 use crate::io::Conn;
 use crate::rdb::Data::Empty;
 
@@ -47,6 +49,8 @@ pub(crate) fn parse(input: &mut Conn,
             RDB_OPCODE_SELECTDB => {
                 let (db, _) = input.read_length()?;
                 meta.db = db;
+                let cmd = SELECT { db: db as i32 };
+                event_handler.handle(Event::AOF(Command::SELECT(&cmd)));
             }
             RDB_OPCODE_RESIZEDB => {
                 let (db, _) = input.read_length()?;
