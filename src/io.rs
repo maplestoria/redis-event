@@ -4,12 +4,14 @@
 
 use std::any::Any;
 use std::cell::{RefCell, RefMut};
+use std::collections::BTreeMap;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::fs::File;
 use std::io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Write};
 use std::iter::FromIterator;
 use std::net::TcpStream;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -626,9 +628,49 @@ impl Conn {
         Ok(())
     }
     
-    pub(crate) fn read_stream_list_packs(&mut self) -> Result<Stream>{
+    pub(crate) fn read_stream_list_packs(&mut self) -> Result<Stream> {
+        let mut entries: BTreeMap<ID, Entry> = BTreeMap::new();
+        let (length, _) = self.read_length()?;
+        for _ in 0..length {
+            let raw_id = self.read_string()?;
+            let mut cursor = Cursor::new(&raw_id);
+            let ms = read_long(&mut cursor, 8, false)?;
+            let seq = read_long(&mut cursor, 8, false)?;
+            let base_id = ID { ms, seq };
+            let raw_list_packs = self.read_string()?;
+            let mut list_pack = Cursor::new(&raw_list_packs);
+            list_pack.set_position(6);
+            let count = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                .unwrap();
+            let deleted = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                .unwrap();
+            let num_fields = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
+                .unwrap();
+            let mut tmp_fields = Vec::with_capacity(num_fields as usize);
+            for _ in 0..num_fields {
+                tmp_fields.push(read_list_pack_entry(&mut list)?);
+            }
+            read_list_pack_entry(&mut list)?
+        }
         unimplemented!()
     }
+}
+
+fn read_long(input: &mut dyn Read, length: i32, little_endian: bool) -> Result<i64> {
+    let mut r: i64 = 0;
+    for i in 0..length {
+        let v: i64 = input.read_u8()? as i64;
+        if little_endian {
+            r |= v << (i << 3) as i64;
+        } else {
+            r = (r << 8) | v;
+        }
+    }
+    Ok(r)
+}
+
+fn read_list_pack_entry(input: &mut dyn Read) -> Result<Vec<u8>> {
+    unimplemented!()
 }
 
 pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> Result<()> {

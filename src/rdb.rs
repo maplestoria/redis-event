@@ -327,26 +327,6 @@ pub struct Stream {
     pub groups: Vec<Group>,
 }
 
-/// # Examples
-///
-/// ```
-/// use redis_event::rdb::ID;
-///
-/// let mut id1 = ID {ms: 0, seq: 0};
-/// let mut id2 = ID {ms: 0, seq: 1};
-///
-/// assert_eq!(id1 < id2, true);
-///
-/// id1.ms = 0;
-/// id1.seq = 1;
-/// assert_eq!(id1 == id2, true);
-/// assert_eq!(id1 >= id2, true);
-/// assert_eq!(id1 <= id2,  true);
-///
-/// id1.ms = 1;
-/// id1.seq = 0;
-/// assert_eq!(id1 > id2, true);
-///```
 #[derive(Debug, Eq)]
 pub struct ID {
     pub ms: i64,

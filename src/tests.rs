@@ -447,6 +447,33 @@ mod rdb_tests {
         
         rdb::parse(&mut file, 0, &mut handler).unwrap();
     }
+    
+    #[test]
+    #[should_panic]
+    fn test_stream() {
+        let file = File::open("tests/rdb/dump-stream.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl EventHandler for TestRdbHandler {
+            fn handle(&mut self, event: Event) {
+                match event {
+                    Event::RDB(rdb) => {
+                        match rdb {
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -646,5 +673,27 @@ mod aof_tests {
         }
         
         assert_eq!(71, cmd_handler.borrow().count);
+    }
+}
+
+#[cfg(test)]
+mod other_tests {
+    use crate::rdb::ID;
+    
+    #[test]
+    fn test_id_cmp() {
+        let mut id1 = ID { ms: 0, seq: 0 };
+        let id2 = ID { ms: 0, seq: 1 };
+        
+        assert_eq!(id1 < id2, true);
+        
+        id1.seq = 1;
+        assert_eq!(id1 == id2, true);
+        assert_eq!(id1 >= id2, true);
+        assert_eq!(id1 <= id2, true);
+        
+        id1.ms = 1;
+        id1.seq = 0;
+        assert_eq!(id1 > id2, true);
     }
 }
