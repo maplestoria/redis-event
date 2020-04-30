@@ -4,6 +4,8 @@ RDB中各项Redis数据相关的结构体定义，以及RDB解析相关的代码
 use core::result;
 use std::any::Any;
 use std::cell::RefMut;
+use std::cmp;
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Error, Formatter};
 use std::io::{Cursor, Read, Result};
 use std::sync::atomic::Ordering;
@@ -195,7 +197,10 @@ pub enum Object<'a> {
     SortedSet(SortedSet<'a>),
     /// 代表Redis中的Hash类型数据
     Hash(Hash<'a>),
+    /// 代表Redis中的module, 需要额外实现Module解析器
     Module(Vec<u8>, Box<dyn Module>),
+    
+    Stream,
     /// 代表rdb数据解析开始
     BOR,
     /// 代表rdb数据解析完毕
@@ -312,6 +317,129 @@ pub struct Field {
     pub name: Vec<u8>,
     /// 字段值
     pub value: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct Stream {
+    pub last_id: ID,
+    pub entries: BTreeMap<ID, Entry>,
+    pub length: i64,
+    pub groups: Vec<Group>,
+}
+
+/// # Examples
+///
+/// ```
+/// use redis_event::rdb::ID;
+///
+/// let mut id1 = ID {ms: 0, seq: 0};
+/// let mut id2 = ID {ms: 0, seq: 1};
+///
+/// assert_eq!(id1 < id2, true);
+///
+/// id1.ms = 0;
+/// id1.seq = 1;
+/// assert_eq!(id1 == id2, true);
+/// assert_eq!(id1 >= id2, true);
+/// assert_eq!(id1 <= id2,  true);
+///
+/// id1.ms = 1;
+/// id1.seq = 0;
+/// assert_eq!(id1 > id2, true);
+///```
+#[derive(Debug, Eq)]
+pub struct ID {
+    pub ms: i64,
+    pub seq: i64,
+}
+
+impl PartialEq for ID {
+    fn eq(&self, other: &Self) -> bool {
+        self.ms == other.ms && self.seq == other.seq
+    }
+    
+    fn ne(&self, other: &Self) -> bool {
+        self.ms != other.ms || self.seq != other.seq
+    }
+}
+
+impl PartialOrd for ID {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+    
+    fn lt(&self, other: &Self) -> bool {
+        match self.cmp(other) {
+            cmp::Ordering::Less => true,
+            cmp::Ordering::Equal => false,
+            cmp::Ordering::Greater => false
+        }
+    }
+    
+    fn le(&self, other: &Self) -> bool {
+        match self.cmp(other) {
+            cmp::Ordering::Less => true,
+            cmp::Ordering::Equal => true,
+            cmp::Ordering::Greater => false
+        }
+    }
+    
+    fn gt(&self, other: &Self) -> bool {
+        match self.cmp(other) {
+            cmp::Ordering::Less => false,
+            cmp::Ordering::Equal => false,
+            cmp::Ordering::Greater => true
+        }
+    }
+    
+    fn ge(&self, other: &Self) -> bool {
+        match self.cmp(other) {
+            cmp::Ordering::Less => { false }
+            cmp::Ordering::Equal => { true }
+            cmp::Ordering::Greater => { true }
+        }
+    }
+}
+
+impl Ord for ID {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        let order = self.ms.cmp(&other.ms);
+        if order == cmp::Ordering::Equal {
+            self.seq.cmp(&other.seq)
+        } else {
+            order
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Entry {
+    pub id: ID,
+    pub deleted: bool,
+    pub fields: Vec<Field>,
+}
+
+#[derive(Debug)]
+pub struct Group {
+    pub name: Vec<u8>,
+    pub last_id: ID,
+    pub pending_entries: BTreeMap<ID, Nack>,
+    pub consumers: Vec<Consumer>,
+}
+
+#[derive(Debug)]
+pub struct Nack {
+    pub id: ID,
+    pub consumer: Consumer,
+    pub delivery_time: i64,
+    pub delivery_count: i64,
+}
+
+#[derive(Debug)]
+pub struct Consumer {
+    pub name: Vec<u8>,
+    pub seen_time: i64,
+    pub pending_entries: BTreeMap<ID, Nack>,
 }
 
 /// Map object types to RDB object types.

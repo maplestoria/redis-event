@@ -598,6 +598,8 @@ impl Conn {
             }
             RDB_TYPE_STREAM_LISTPACKS => {
                 // TODO
+                let key = self.read_string()?;
+                let stream = self.read_stream_list_packs()?;
                 unimplemented!("RDB_TYPE_STREAM_LISTPACKS");
             }
             _ => panic!("unknown data type: {}", value_type)
@@ -622,6 +624,10 @@ impl Conn {
             }
         }
         Ok(())
+    }
+    
+    pub(crate) fn read_stream_list_packs(&mut self) -> Result<Stream>{
+        unimplemented!()
     }
 }
 
