@@ -14,8 +14,6 @@
 */
 use std::cell::RefMut;
 
-use log::error;
-
 use crate::{Event, EventHandler};
 use crate::cmd::connection::{SELECT, SWAPDB};
 use crate::cmd::hashes::*;
@@ -121,6 +119,13 @@ pub enum Command<'a> {
     ZREMRANGEBYRANK(&'a ZREMRANGEBYRANK<'a>),
     ZREMRANGEBYSCORE(&'a ZREMRANGEBYSCORE<'a>),
     ZUNIONSTORE(&'a ZUNIONSTORE<'a>),
+    Other(RawCommand),
+}
+
+#[derive(Debug)]
+pub struct RawCommand {
+    pub name: String,
+    pub args: Vec<Vec<u8>>,
 }
 
 pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut RefMut<dyn EventHandler>) {
@@ -432,7 +437,15 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut RefMut<dyn EventHandle
                 // PING命令是由Redis master主动发送过来，判断下游节点是否活跃，不需要处理
             }
             _ => {
-                error!("unknown command: {}", cmd_name);
+                let mut args = Vec::new();
+                while let Some(arg) = iter.next() {
+                    args.push(arg.clone());
+                }
+                let cmd = RawCommand {
+                    name: cmd_name,
+                    args,
+                };
+                cmd_handler.handle(Event::AOF(Command::Other(cmd)))
             }
         };
     }
