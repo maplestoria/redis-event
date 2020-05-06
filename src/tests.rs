@@ -7,7 +7,7 @@ mod rdb_tests {
     use std::rc::Rc;
     
     use crate::{Event, EventHandler, io, ModuleParser, rdb};
-    use crate::rdb::{EvictType, ExpireType, Module, Object};
+    use crate::rdb::{Entry, EvictType, ExpireType, ID, Module, Object};
     
     #[test]
     fn test_zipmap_not_compress() {
@@ -461,8 +461,111 @@ mod rdb_tests {
                     Event::RDB(rdb) => {
                         match rdb {
                             Object::Stream(key, stream) => {
-                                println!("key: {}", String::from_utf8(key).unwrap());
-                                println!("stream: {:?}", stream);
+                                let key = String::from_utf8(key).unwrap();
+                                if &key == "listpack" {
+                                    let mut i = 0;
+                                    for (_, entry) in &stream.entries {
+                                        let __key = format!("field{}", i);
+                                        assert!(entry.fields.contains_key(__key.as_bytes()));
+                                        i += 1;
+                                    }
+                                } else if &key == "trim" {
+                                    let mut i = 0;
+                                    for (_, entry) in &stream.entries {
+                                        if i < 20 {
+                                            assert!(entry.deleted)
+                                        } else {
+                                            if entry.id.eq(&ID { ms: 1528512149341, seq: 0 }) {
+                                                assert!(entry.deleted)
+                                            } else if entry.id.eq(&ID { ms: 1528512149742, seq: 0 }) {
+                                                assert!(entry.deleted)
+                                            } else {
+                                                assert!(entry.deleted == false)
+                                            }
+                                        }
+                                        i += 1;
+                                    }
+                                } else if &key == "nums" {
+                                    let mut i = 0;
+                                    for (_, entry) in stream.entries {
+                                        match i {
+                                            0 => {
+                                                let __key = format!("{}", -2);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            1 => {
+                                                let __key = format!("{}", -2000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            2 => {
+                                                let __key = format!("{}", -20000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            3 => {
+                                                let __key = format!("{}", -200000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            4 => {
+                                                let __key = format!("{}", -20000000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            5 => {
+                                                let __key = format!("{}", -2000000000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            6 => {
+                                                let __key = format!("{}", -200000000000 as i64);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            7 => {
+                                                let __key = format!("{}", -20000000000000 as i64);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            8 => {
+                                                let __key = format!("{}", -2);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            9 => {
+                                                let __key = format!("{}", -2000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            10 => {
+                                                let __key = format!("{}", -20000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            11 => {
+                                                let __key = format!("{}", -200000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            12 => {
+                                                let __key = format!("{}", -20000000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            13 => {
+                                                let __key = format!("{}", -2000000000);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            14 => {
+                                                let __key = format!("{}", -200000000000 as i64);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            15 => {
+                                                let __key = format!("{}", -20000000000000 as i64);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            16 => {
+                                                let __key = format!("{}", -20);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            17 => {
+                                                let __key = format!("{}", -200);
+                                                assert!(entry.fields.contains_key(__key.as_bytes()));
+                                            }
+                                            _ => break
+                                        }
+                                        i += 1;
+                                    }
+                                }
                             }
                             _ => {}
                         }

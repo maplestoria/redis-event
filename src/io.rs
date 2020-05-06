@@ -673,8 +673,8 @@ impl Conn {
                     let num_fields = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
                         .unwrap();
                     for _ in 0..num_fields {
-                        let value = read_list_pack_entry(&mut list_pack)?;
                         let field = read_list_pack_entry(&mut list_pack)?;
+                        let value = read_list_pack_entry(&mut list_pack)?;
                         fields.insert(field, value);
                     }
                     entries.insert(id, Entry { id, deleted, fields });
@@ -756,7 +756,7 @@ fn read_long(input: &mut dyn Read, length: i32, little_endian: bool) -> Result<i
 
 fn read_list_pack_entry(input: &mut dyn Read) -> Result<Vec<u8>> {
     let special = input.read_u8()? as i32;
-    let mut skip: i32 = 0;
+    let skip: i32;
     let mut bytes;
     if (special & 0x80) == 0 {
         skip = 1;
