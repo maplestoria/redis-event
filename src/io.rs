@@ -599,10 +599,9 @@ impl Conn {
                 }
             }
             RDB_TYPE_STREAM_LISTPACKS => {
-                // TODO
                 let key = self.read_string()?;
                 let stream = self.read_stream_list_packs()?;
-                unimplemented!("RDB_TYPE_STREAM_LISTPACKS");
+                event_handler.handle(Event::RDB(Object::Stream(key, stream)));
             }
             _ => panic!("unknown data type: {}", value_type)
         }
@@ -654,7 +653,7 @@ impl Conn {
             
             let total = count + deleted;
             for _ in 0..total {
-                let mut fields: Vec<Field> = Vec::with_capacity(total as usize);
+                let mut fields = BTreeMap::new();
                 let flag = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
                     .unwrap();
                 let ms = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?))
@@ -667,7 +666,7 @@ impl Conn {
                     for i in 0..num_fields {
                         let value = read_list_pack_entry(&mut list_pack)?;
                         let field = tmp_fields.get(i as usize).unwrap().to_vec();
-                        fields.push(Field { name: field, value });
+                        fields.insert(field, value);
                     }
                     entries.insert(id, Entry { id, deleted, fields });
                 } else {
@@ -676,7 +675,7 @@ impl Conn {
                     for _ in 0..num_fields {
                         let value = read_list_pack_entry(&mut list_pack)?;
                         let field = read_list_pack_entry(&mut list_pack)?;
-                        fields.push(Field { name: field, value });
+                        fields.insert(field, value);
                     }
                     entries.insert(id, Entry { id, deleted, fields });
                 }
@@ -707,7 +706,7 @@ impl Conn {
                 let seq = read_long(&mut self.input, 8, false)?;
                 let id = ID { ms, seq };
                 let delivery_time = self.read_integer(8, false)?;
-                let delivery_count = self.read_integer(8, false)?;
+                let (delivery_count, _) = self.read_length()?;
                 group_pending_entries.insert(id, Nack {
                     id,
                     consumer: None,
@@ -738,7 +737,7 @@ impl Conn {
                 // todo
             }
         }
-        unimplemented!()
+        Ok(Stream { entries })
     }
 }
 
@@ -756,7 +755,76 @@ fn read_long(input: &mut dyn Read, length: i32, little_endian: bool) -> Result<i
 }
 
 fn read_list_pack_entry(input: &mut dyn Read) -> Result<Vec<u8>> {
-    unimplemented!()
+    let special = input.read_u8()? as i32;
+    let mut skip: i32 = 0;
+    let mut bytes;
+    if (special & 0x80) == 0 {
+        skip = 1;
+        let value = special & 0x7F;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xC0) == 0x80 {
+        let len = special & 0x3F;
+        skip = 1 + len as i32;
+        bytes = vec![0; len as usize];
+        input.read_exact(&mut bytes)?;
+    } else if (special & 0xE0) == 0xC0 {
+        skip = 2;
+        let next = input.read_u8()?;
+        let value = (((special & 0x1F) << 8) | next as i32) << 19 >> 19;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF1 {
+        skip = 3;
+        let value = input.read_i16::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF2 {
+        skip = 4;
+        let value = input.read_i24::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF3 {
+        skip = 5;
+        let value = input.read_i32::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF4 {
+        skip = 9;
+        let value = input.read_i64::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xF0) == 0xE0 {
+        let next = input.read_u8()?;
+        let len = ((special & 0x0F) << 8) | next as i32;
+        skip = 2 + len as i32;
+        bytes = vec![0; len as usize];
+        input.read_exact(&mut bytes)?;
+    } else if (special & 0xFF) == 0xF0 {
+        let len = input.read_u32::<BigEndian>()?;
+        skip = 5 + len as i32;
+        bytes = vec![0; len as usize];
+        input.read_exact(&mut bytes)?;
+    } else {
+        panic!("{}", special)
+    }
+    if skip <= 127 {
+        let mut buf = vec![0; 1];
+        input.read_exact(&mut buf)?;
+    } else if skip < 16383 {
+        let mut buf = vec![0; 2];
+        input.read_exact(&mut buf)?;
+    } else if skip < 2097151 {
+        let mut buf = vec![0; 3];
+        input.read_exact(&mut buf)?;
+    } else if skip < 268435455 {
+        let mut buf = vec![0; 4];
+        input.read_exact(&mut buf)?;
+    } else {
+        let mut buf = vec![0; 5];
+        input.read_exact(&mut buf)?;
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn send<T: Write>(output: &mut T, command: &[u8], args: &[&[u8]]) -> Result<()> {

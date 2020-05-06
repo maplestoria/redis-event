@@ -200,7 +200,7 @@ pub enum Object<'a> {
     /// 代表Redis中的module, 需要额外实现Module解析器
     Module(Vec<u8>, Box<dyn Module>),
     
-    Stream,
+    Stream(Vec<u8>, Stream),
     /// 代表rdb数据解析开始
     BOR,
     /// 代表rdb数据解析完毕
@@ -321,10 +321,10 @@ pub struct Field {
 
 #[derive(Debug)]
 pub struct Stream {
-    pub last_id: ID,
-    pub entries: BTreeMap<ID, Entry>,
-    pub length: i64,
-    pub groups: Vec<Group>,
+    //    pub last_id: ID,
+    pub entries: BTreeMap<ID, Entry>
+//    pub length: i64,
+//    pub groups: Vec<Group>,
 }
 
 #[derive(Debug, Eq, Copy, Clone)]
@@ -396,7 +396,7 @@ impl Ord for ID {
 pub struct Entry {
     pub id: ID,
     pub deleted: bool,
-    pub fields: Vec<Field>,
+    pub fields: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 #[derive(Debug)]

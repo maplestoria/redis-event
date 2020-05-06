@@ -449,7 +449,6 @@ mod rdb_tests {
     }
     
     #[test]
-    #[should_panic]
     fn test_stream() {
         let file = File::open("tests/rdb/dump-stream.rdb").expect("file not found");
         let mut file = io::from_file(file);
@@ -461,6 +460,10 @@ mod rdb_tests {
                 match event {
                     Event::RDB(rdb) => {
                         match rdb {
+                            Object::Stream(key, stream) => {
+                                println!("key: {}", String::from_utf8(key).unwrap());
+                                println!("stream: {:?}", stream);
+                            }
                             _ => {}
                         }
                     }
