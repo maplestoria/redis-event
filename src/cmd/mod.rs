@@ -25,6 +25,7 @@ use crate::cmd::scripting::{EVAL, EVALSHA, SCRIPTLOAD};
 use crate::cmd::server::{FLUSHALL, FLUSHDB};
 use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
+use crate::cmd::streams::{XACK, XADD, XCLAIM, XDEL, XGROUP};
 use crate::cmd::strings::*;
 
 pub mod connection;
@@ -38,6 +39,7 @@ pub mod server;
 pub mod sets;
 pub mod sorted_sets;
 pub mod strings;
+pub mod streams;
 
 /// 所有支持的Redis命令
 ///
@@ -119,6 +121,11 @@ pub enum Command<'a> {
     ZREMRANGEBYRANK(&'a ZREMRANGEBYRANK<'a>),
     ZREMRANGEBYSCORE(&'a ZREMRANGEBYSCORE<'a>),
     ZUNIONSTORE(&'a ZUNIONSTORE<'a>),
+    XACK(&'a XACK<'a>),
+    XADD(&'a XADD<'a>),
+    XCLAIM(&'a XCLAIM<'a>),
+    XDEL(&'a XDEL<'a>),
+    XGROUP(&'a XGROUP<'a>),
     Other(RawCommand),
 }
 
@@ -432,6 +439,26 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut RefMut<dyn EventHandle
             "ZUNIONSTORE" => {
                 let cmd = sorted_sets::parse_zunionstore(iter);
                 cmd_handler.handle(Event::AOF(Command::ZUNIONSTORE(&cmd)));
+            }
+            "XACK" => {
+                let cmd = streams::parse_xack(iter);
+                cmd_handler.handle(Event::AOF(Command::XACK(&cmd)));
+            }
+            "XADD" => {
+                let cmd = streams::parse_xadd(iter);
+                cmd_handler.handle(Event::AOF(Command::XADD(&cmd)));
+            }
+            "XCLAIM" => {
+                let cmd = streams::parse_xclaim(iter);
+                cmd_handler.handle(Event::AOF(Command::XCLAIM(&cmd)));
+            }
+            "XDEL" => {
+                let cmd = streams::parse_xdel(iter);
+                cmd_handler.handle(Event::AOF(Command::XDEL(&cmd)));
+            }
+            "XGROUP" => {
+                let cmd = streams::parse_xgroup(iter);
+                cmd_handler.handle(Event::AOF(Command::XGROUP(&cmd)));
             }
             "PING" => {
                 // PING命令是由Redis master主动发送过来，判断下游节点是否活跃，不需要处理
