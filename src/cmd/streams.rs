@@ -226,3 +226,32 @@ pub(crate) fn parse_xgroup(mut iter: Iter<Vec<u8>>) -> XGROUP {
         del_consumer,
     }
 }
+
+#[derive(Debug)]
+pub struct XTRIM<'a> {
+    pub key: &'a [u8],
+    pub approximation: bool,
+    pub count: u64,
+}
+
+pub(crate) fn parse_xtrim(mut iter: Iter<Vec<u8>>) -> XTRIM {
+    let key = iter.next().unwrap();
+    iter.next().unwrap();
+    let third = iter.next().unwrap();
+    let third = String::from_utf8_lossy(third);
+    let approximation;
+    let count;
+    if "~" == third {
+        approximation = true;
+        let arg = String::from_utf8_lossy(iter.next().unwrap());
+        count = arg.parse::<u64>().unwrap();
+    } else {
+        approximation = false;
+        count = third.parse::<u64>().unwrap();
+    }
+    XTRIM {
+        key,
+        approximation,
+        count,
+    }
+}

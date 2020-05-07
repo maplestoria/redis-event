@@ -25,7 +25,7 @@ use crate::cmd::scripting::{EVAL, EVALSHA, SCRIPTLOAD};
 use crate::cmd::server::{FLUSHALL, FLUSHDB};
 use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
-use crate::cmd::streams::{XACK, XADD, XCLAIM, XDEL, XGROUP};
+use crate::cmd::streams::{XACK, XADD, XCLAIM, XDEL, XGROUP, XTRIM};
 use crate::cmd::strings::*;
 
 pub mod connection;
@@ -126,6 +126,7 @@ pub enum Command<'a> {
     XCLAIM(&'a XCLAIM<'a>),
     XDEL(&'a XDEL<'a>),
     XGROUP(&'a XGROUP<'a>),
+    XTRIM(&'a XTRIM<'a>),
     Other(RawCommand),
 }
 
@@ -459,6 +460,10 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut RefMut<dyn EventHandle
             "XGROUP" => {
                 let cmd = streams::parse_xgroup(iter);
                 cmd_handler.handle(Event::AOF(Command::XGROUP(&cmd)));
+            }
+            "XTRIM" => {
+                let cmd = streams::parse_xtrim(iter);
+                cmd_handler.handle(Event::AOF(Command::XTRIM(&cmd)));
             }
             "PING" => {
                 // PING命令是由Redis master主动发送过来，判断下游节点是否活跃，不需要处理
