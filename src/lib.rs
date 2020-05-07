@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::str::FromStr;
 use std::rc::Rc;
 use std::cell::RefCell;
-use redis_event::listener::standalone;
+use redis_event::listener;
 use redis_event::config::Config;
 use redis_event::{NoOpEventHandler, RedisListener};
 
@@ -37,7 +37,7 @@ let conf = Config {
     write_timeout: None,              // None，即写入永不超时
 };
 let running = Arc::new(AtomicBool::new(true));
-let mut redis_listener = standalone::new(conf, running);
+let mut redis_listener = listener::new(conf, running);
 // 设置事件处理器
 redis_listener.set_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
 // 启动程序

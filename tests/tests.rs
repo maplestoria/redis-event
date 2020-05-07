@@ -18,7 +18,7 @@ use serial_test::serial;
 
 use redis_event::{cmd, Event, EventHandler, RedisListener};
 use redis_event::config::Config;
-use redis_event::listener::standalone;
+use redis_event::listener;
 use redis_event::rdb::{ExpireType, Object};
 
 #[test]
@@ -665,7 +665,7 @@ fn test_aof() {
             write_timeout: None,
         };
         let running = Arc::new(AtomicBool::new(true));
-        let mut redis_listener = standalone::new(conf, running);
+        let mut redis_listener = listener::new(conf, running);
         redis_listener.set_event_handler(Rc::new(RefCell::new(cmd_handler)));
         if let Err(_) = redis_listener.start() {
             println!("redis-server closed");
@@ -717,7 +717,7 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
         write_timeout: None,
     };
     let running = Arc::new(AtomicBool::new(true));
-    let mut redis_listener = standalone::new(conf, running);
+    let mut redis_listener = listener::new(conf, running);
     redis_listener.set_event_handler(rdb_handler);
     if let Err(error) = redis_listener.start() {
         eprintln!("error: {}", error);
