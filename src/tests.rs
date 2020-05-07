@@ -7,7 +7,7 @@ mod rdb_tests {
     use std::rc::Rc;
     
     use crate::{Event, EventHandler, io, ModuleParser, rdb};
-    use crate::rdb::{Entry, EvictType, ExpireType, ID, Module, Object};
+    use crate::rdb::{EvictType, ExpireType, ID, Module, Object};
     
     #[test]
     fn test_zipmap_not_compress() {
@@ -449,6 +449,22 @@ mod rdb_tests {
     }
     
     #[test]
+    fn test_module3() {
+        let file = File::open("tests/rdb/dump-json-module.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        struct TestRdbHandler {}
+        
+        impl EventHandler for TestRdbHandler {
+            fn handle(&mut self, _: Event) {}
+        }
+        
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler).unwrap();
+    }
+    
+    #[test]
     fn test_stream() {
         let file = File::open("tests/rdb/dump-stream.rdb").expect("file not found");
         let mut file = io::from_file(file);
@@ -581,12 +597,28 @@ mod rdb_tests {
         
         rdb::parse(&mut file, 0, &mut handler).unwrap();
     }
+    
+    #[test]
+    fn test_stream1() {
+        let file = File::open("tests/rdb/dump-stream1.rdb").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestRdbHandler {}
+        
+        impl EventHandler for TestRdbHandler {
+            fn handle(&mut self, _: Event) {}
+        }
+        
+        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
+        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        
+        rdb::parse(&mut file, 0, &mut handler).unwrap();
+    }
 }
 
 #[cfg(test)]
 mod aof_tests {
     use std::cell::{RefCell, RefMut};
-    use std::error::Error;
     use std::fs::File;
     use std::rc::Rc;
     
@@ -651,7 +683,7 @@ mod aof_tests {
                 Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
-                    if "failed to fill whole buffer".eq(err.description()) {
+                    if "failed to fill whole buffer".eq(&err.to_string()) {
                         break;
                     } else {
                         panic!(err);
@@ -697,7 +729,7 @@ mod aof_tests {
                 Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
-                    if "failed to fill whole buffer".eq(err.description()) {
+                    if "failed to fill whole buffer".eq(&err.to_string()) {
                         break;
                     } else {
                         panic!(err);
@@ -733,7 +765,7 @@ mod aof_tests {
                 Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
-                    if "failed to fill whole buffer".eq(err.description()) {
+                    if "failed to fill whole buffer".eq(&err.to_string()) {
                         break;
                     } else {
                         panic!(err);
@@ -769,7 +801,7 @@ mod aof_tests {
                 Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
                 Err(err) => {
                     // eof reached
-                    if "failed to fill whole buffer".eq(err.description()) {
+                    if "failed to fill whole buffer".eq(&err.to_string()) {
                         break;
                     } else {
                         panic!(err);
@@ -780,6 +812,78 @@ mod aof_tests {
         }
         
         assert_eq!(71, cmd_handler.borrow().count);
+    }
+    
+    #[test]
+    fn test_aof6() {
+        let file = File::open("tests/aof/appendonly.aof").expect("file not found");
+        let mut file = io::from_file(file);
+        
+        struct TestCmdHandler {}
+        
+        impl EventHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Event) {
+                match cmd {
+                    Event::RDB(_) => {}
+                    Event::AOF(cmd) => {
+                        match cmd {
+                            Command::XADD(xadd) => {
+                                let key = String::from_utf8_lossy(xadd.key);
+                                assert_eq!(key, "stream");
+                                for field in &xadd.fields {
+                                    let name = String::from_utf8_lossy(field.name);
+                                    let value = String::from_utf8_lossy(field.value);
+                                    if "name" == name {
+                                        assert_eq!("tomcat", value);
+                                    } else if "age" == name {
+                                        assert_eq!("18", value);
+                                    }
+                                }
+                            }
+                            Command::XGROUP(xgroup) => {
+                                if let Some(create) = &xgroup.create {
+                                    let key = String::from_utf8_lossy(create.key);
+                                    assert_eq!("stream", key);
+                                    let group = String::from_utf8_lossy(create.group_name);
+                                    assert_eq!("group", group);
+                                }
+                            }
+                            Command::XTRIM(xtrim) => {
+                                assert_eq!(false, xtrim.approximation);
+                                assert_eq!(1, xtrim.count);
+                            }
+                            Command::XDEL(xdel) => {
+                                assert!(xdel.ids.len() == 1);
+                                let id = xdel.ids.get(0);
+                                let id = id.unwrap();
+                                let id = String::from_utf8_lossy(*id);
+                                assert_eq!("1588842699754-0", id);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        
+        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler {}));
+        let mut cmd_handler: RefMut<dyn EventHandler> = cmd_handler.borrow_mut();
+        
+        loop {
+            match file.reply(io::read_bytes, &mut cmd_handler) {
+                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
+                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
+                Err(err) => {
+                    // eof reached
+                    if "failed to fill whole buffer".eq(&err.to_string()) {
+                        break;
+                    } else {
+                        panic!(err);
+                    }
+                }
+                Ok(Data::Empty) => break
+            }
+        }
     }
 }
 
