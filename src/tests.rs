@@ -469,6 +469,7 @@ mod rdb_tests {
                                         assert!(entry.fields.contains_key(__key.as_bytes()));
                                         i += 1;
                                     }
+                                    assert!(stream.groups.len() == 4);
                                 } else if &key == "trim" {
                                     let mut i = 0;
                                     for (_, entry) in &stream.entries {

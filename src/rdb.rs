@@ -321,16 +321,20 @@ pub struct Field {
 
 #[derive(Debug)]
 pub struct Stream {
-    //    pub last_id: ID,
-    pub entries: BTreeMap<ID, Entry>
-//    pub length: i64,
-//    pub groups: Vec<Group>,
+    pub entries: BTreeMap<ID, Entry>,
+    pub groups: Vec<Group>,
 }
 
 #[derive(Debug, Eq, Copy, Clone)]
 pub struct ID {
     pub ms: i64,
     pub seq: i64,
+}
+
+impl ID {
+    pub fn to_string(&self) -> String {
+        format!("{}-{}", self.ms, self.seq)
+    }
 }
 
 impl PartialEq for ID {
@@ -374,9 +378,9 @@ impl PartialOrd for ID {
     
     fn ge(&self, other: &Self) -> bool {
         match self.cmp(other) {
-            cmp::Ordering::Less => { false }
-            cmp::Ordering::Equal => { true }
-            cmp::Ordering::Greater => { true }
+            cmp::Ordering::Less => false,
+            cmp::Ordering::Equal => true,
+            cmp::Ordering::Greater => true
         }
     }
 }
@@ -402,24 +406,7 @@ pub struct Entry {
 #[derive(Debug)]
 pub struct Group {
     pub name: Vec<u8>,
-    pub last_id: ID,
-    pub pending_entries: BTreeMap<ID, Nack>,
-    pub consumers: Vec<Consumer>,
-}
-
-#[derive(Debug)]
-pub struct Nack {
-    pub id: ID,
-    pub consumer: Option<Consumer>,
-    pub delivery_time: i64,
-    pub delivery_count: i64,
-}
-
-#[derive(Debug)]
-pub struct Consumer {
-    pub name: Vec<u8>,
-    pub seen_time: i64,
-    pub pending_entries: BTreeMap<ID, Nack>,
+    pub last_id: ID
 }
 
 /// Map object types to RDB object types.

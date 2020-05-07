@@ -686,58 +686,40 @@ impl Conn {
                 panic!("listpack expect 255 but {}", end);
             }
         }
-        let (length, _) = self.read_length()?;
-        let (ms, _) = self.read_length()?;
-        let (seq, _) = self.read_length()?;
-        let last_id = ID { ms: ms as i64, seq: seq as i64 };
+        self.read_length()?;
+        self.read_length()?;
+        self.read_length()?;
         
-        let groups: Vec<Group> = Vec::new();
+        let mut groups: Vec<Group> = Vec::new();
         let (count, _) = self.read_length()?;
         for _ in 0..count {
             let name = self.read_string()?;
             let (ms, _) = self.read_length()?;
             let (seq, _) = self.read_length()?;
             let group_last_id = ID { ms: ms as i64, seq: seq as i64 };
-            
-            let mut group_pending_entries: BTreeMap<ID, Nack> = BTreeMap::new();
+            groups.push(Group { name, last_id: group_last_id });
+    
             let (global_pel, _) = self.read_length()?;
             for _ in 0..global_pel {
-                let ms = read_long(&mut self.input, 8, false)?;
-                let seq = read_long(&mut self.input, 8, false)?;
-                let id = ID { ms, seq };
-                let delivery_time = self.read_integer(8, false)?;
-                let (delivery_count, _) = self.read_length()?;
-                group_pending_entries.insert(id, Nack {
-                    id,
-                    consumer: None,
-                    delivery_time: delivery_time as i64,
-                    delivery_count: delivery_count as i64,
-                });
+                read_long(&mut self.input, 8, false)?;
+                read_long(&mut self.input, 8, false)?;
+                self.read_integer(8, false)?;
+                self.read_length()?;
             }
             
-            let mut consumers: Vec<Consumer> = Vec::new();
             let (consumer_count, _) = self.read_length()?;
             for _ in 0..consumer_count {
-                let consumer_name = self.read_string()?;
-                let seen_time = self.read_integer(8, false)?;
-                let consumer = Consumer {
-                    name: consumer_name,
-                    seen_time: seen_time as i64,
-                    pending_entries: Default::default(),
-                };
+                self.read_string()?;
+                self.read_integer(8, false)?;
                 
-                let mut consumer_pending_entries: BTreeMap<ID, Nack> = BTreeMap::new();
                 let (pel, _) = self.read_length()?;
                 for _ in 0..pel {
-                    let ms = read_long(&mut self.input, 8, false)?;
-                    let seq = read_long(&mut self.input, 8, false)?;
-                    let id = ID { ms, seq };
-                    let nack = group_pending_entries.get(&id).unwrap();
+                    read_long(&mut self.input, 8, false)?;
+                    read_long(&mut self.input, 8, false)?;
                 }
-                // todo
             }
         }
-        Ok(Stream { entries })
+        Ok(Stream { entries, groups })
     }
 }
 
