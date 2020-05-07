@@ -619,9 +619,9 @@ impl Conn {
             } else if op_code == RDB_MODULE_OPCODE_STRING {
                 self.read_string()?;
             } else if op_code == RDB_MODULE_OPCODE_FLOAT {
-                self.read_exact(&mut [4; 0])?;
+                self.read_exact(&mut [0; 4])?;
             } else if op_code == RDB_MODULE_OPCODE_DOUBLE {
-                self.read_exact(&mut [8; 0])?;
+                self.read_exact(&mut [0; 8])?;
             }
         }
         Ok(())
