@@ -584,15 +584,18 @@ impl Conn {
                     panic!("MODULE {}, version {} 无法解析", module_name, module_version);
                 }
                 if let Some(parser) = &mut self.module_parser {
-                    let module: Box<dyn Module> = parser.borrow_mut().parse(&mut self.input, &module_name, module_version);
-                    event_handler.handle(Event::RDB(Object::Module(key, module)));
+                    let module: Box<dyn Module>;
                     if value_type == RDB_TYPE_MODULE_2 {
+                        module = parser.borrow_mut().parse(&mut self.input, &module_name, 2);
                         let (len, _) = self.read_length()?;
                         if len != 0 {
-                            panic!("The RDB file contains module data for the module '{}' that is not terminated by the proper module value EOF marker",
-                                   &module_name);
+                            panic!("module '{}' that is not terminated by EOF marker, but {}",
+                                   &module_name, len);
                         }
+                    } else {
+                        module = parser.borrow_mut().parse(&mut self.input, &module_name, module_version);
                     }
+                    event_handler.handle(Event::RDB(Object::Module(key, module)));
                 } else {
                     // 没有parser，并且是Module 2类型的值，那就可以直接跳过了
                     self.rdb_load_check_module_value()?;
@@ -698,7 +701,7 @@ impl Conn {
             let (seq, _) = self.read_length()?;
             let group_last_id = ID { ms: ms as i64, seq: seq as i64 };
             groups.push(Group { name, last_id: group_last_id });
-    
+            
             let (global_pel, _) = self.read_length()?;
             for _ in 0..global_pel {
                 read_long(&mut self.input, 8, false)?;

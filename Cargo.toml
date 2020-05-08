@@ -1,6 +1,6 @@
 [package]
 name = "redis-event"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["maplestoria <zkx6648@gmail.com>"]
 edition = "2018"
 description = "用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用"
@@ -21,3 +21,5 @@ lazy_static = "1.4.0"
 [dev-dependencies]
 serial_test = "0.3.2"
 redis = "0.14.0"
+num-bigint = "0.2.6"
+num-traits = "0.2.11"

@@ -1,13 +1,18 @@
 #[cfg(test)]
 mod rdb_tests {
+    use std::any::Any;
     use std::cell::{RefCell, RefMut};
     use std::collections::HashMap;
     use std::fs::File;
-    use std::io::Read;
+    use std::io::{Cursor, Read};
     use std::rc::Rc;
     
+    use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+    use num_bigint::Sign;
+    use num_traits::ToPrimitive;
+    
     use crate::{Event, EventHandler, io, ModuleParser, rdb};
-    use crate::rdb::{EvictType, ExpireType, ID, Module, Object};
+    use crate::rdb::{EvictType, ExpireType, ID, Module, Object, RDB_14BITLEN, RDB_32BITLEN, RDB_64BITLEN, RDB_6BITLEN, RDB_ENCVAL};
     
     #[test]
     fn test_zipmap_not_compress() {
@@ -368,22 +373,111 @@ mod rdb_tests {
             .unwrap();
     }
     
+    fn read_length(input: &mut dyn Read) -> std::io::Result<(isize, bool)> {
+        let byte = input.read_u8()?;
+        let _type = (byte & 0xC0) >> 6;
+        
+        let mut result = -1;
+        let mut is_encoded = false;
+        
+        if _type == RDB_ENCVAL {
+            result = (byte & 0x3F) as isize;
+            is_encoded = true;
+        } else if _type == RDB_6BITLEN {
+            result = (byte & 0x3F) as isize;
+        } else if _type == RDB_14BITLEN {
+            let next_byte = input.read_u8()?;
+            result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
+        } else if byte == RDB_32BITLEN {
+            result = read_integer(input, 4, true)?;
+        } else if byte == RDB_64BITLEN {
+            result = read_integer(input, 8, true)?;
+        };
+        Ok((result, is_encoded))
+    }
+    
+    // 从流中读取一个Integer
+    fn read_integer(input: &mut dyn Read, size: isize, is_big_endian: bool) -> std::io::Result<isize> {
+        let mut buff = vec![0; size as usize];
+        input.read_exact(&mut buff)?;
+        let mut cursor = Cursor::new(&buff);
+        
+        if is_big_endian {
+            if size == 2 {
+                return Ok(cursor.read_i16::<BigEndian>()? as isize);
+            } else if size == 4 {
+                return Ok(cursor.read_i32::<BigEndian>()? as isize);
+            } else if size == 8 {
+                return Ok(cursor.read_i64::<BigEndian>()? as isize);
+            };
+        } else {
+            if size == 2 {
+                return Ok(cursor.read_i16::<LittleEndian>()? as isize);
+            } else if size == 4 {
+                return Ok(cursor.read_i32::<LittleEndian>()? as isize);
+            } else if size == 8 {
+                return Ok(cursor.read_i64::<LittleEndian>()? as isize);
+            };
+        }
+        panic!("Invalid integer size: {}", size)
+    }
+    
+    struct HelloModuleParser {}
+    
+    #[derive(Debug)]
+    struct HelloModule {
+        pub values: Vec<i64>
+    }
+    
+    impl Module for HelloModule {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+    
+    impl HelloModuleParser {
+        fn load_unsigned(&self, input: &mut dyn Read, version: usize) -> num_bigint::BigInt {
+            let mut digits = [0; 8];
+            let value = self.load_signed(input, version);
+            for i in 0..8 {
+                digits[7 - i] = ((value as usize >> (i << 3)) & 0xFF) as u8;
+            }
+            num_bigint::BigInt::from_bytes_be(Sign::Plus, &digits)
+        }
+        
+        fn load_signed(&self, input: &mut dyn Read, version: usize) -> i64 {
+            if version == 2 {
+                let (opcode, _) = read_length(input).unwrap();
+                if opcode != 2 {
+                    panic!("opcode != 2");
+                }
+            }
+            let (len, _) = read_length(input).unwrap();
+            len as i64
+        }
+    }
+    
+    impl ModuleParser for HelloModuleParser {
+        fn parse(&mut self, input: &mut dyn Read, _module_name: &str, module_version: usize) -> Box<dyn Module> {
+            let elements = self.load_unsigned(input, module_version);
+            let elements = elements.to_u32().unwrap();
+            
+            let mut array = Vec::new();
+            for _ in 0..elements {
+                let val = self.load_signed(input, module_version);
+                array.push(val);
+            }
+            
+            Box::new(HelloModule { values: array })
+        }
+    }
+    
     #[test]
-    #[should_panic]
     fn test_module() {
         let file = File::open("tests/rdb/module.rdb").expect("file not found");
         let mut file = io::from_file(file);
         
-        struct TestModuleParser {}
-        
-        impl ModuleParser for TestModuleParser {
-            fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module> {
-                println!("module_name: [{}] module_version: [{}]", module_name, module_version);
-                unimplemented!();
-            }
-        }
-        
-        let parser = Rc::new(RefCell::new(TestModuleParser {}));
+        let parser = Rc::new(RefCell::new(HelloModuleParser {}));
         file.module_parser = Option::Some(parser);
         
         struct TestRdbHandler {}
@@ -393,7 +487,16 @@ mod rdb_tests {
                 match event {
                     Event::RDB(rdb) => {
                         match rdb {
-                            Object::Module(key, module) => {}
+                            Object::Module(_, module) => {
+                                let hello_module: &HelloModule = match module.as_any().downcast_ref::<HelloModule>() {
+                                    Some(hello_module) => hello_module,
+                                    None => panic!("not HelloModule")
+                                };
+                                let values = &hello_module.values;
+                                assert_eq!(1, values.len());
+                                let val = values.get(0).unwrap();
+                                assert_eq!(&12123123112, val);
+                            }
                             _ => {}
                         }
                     }
@@ -409,21 +512,11 @@ mod rdb_tests {
     }
     
     #[test]
-    #[should_panic]
     fn test_module2() {
         let file = File::open("tests/rdb/dump-module-2.rdb").expect("file not found");
         let mut file = io::from_file(file);
         
-        struct TestModuleParser {}
-        
-        impl ModuleParser for TestModuleParser {
-            fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module> {
-                println!("module_name: [{}] module_version: [{}]", module_name, module_version);
-                unimplemented!();
-            }
-        }
-        
-        let parser = Rc::new(RefCell::new(TestModuleParser {}));
+        let parser = Rc::new(RefCell::new(HelloModuleParser {}));
         file.module_parser = Option::Some(parser);
         
         struct TestRdbHandler {}
@@ -433,7 +526,18 @@ mod rdb_tests {
                 match event {
                     Event::RDB(rdb) => {
                         match rdb {
-                            Object::Module(key, module) => {}
+                            Object::Module(_, module) => {
+                                let hello_module: &HelloModule = match module.as_any().downcast_ref::<HelloModule>() {
+                                    Some(hello_module) => hello_module,
+                                    None => panic!("not HelloModule")
+                                };
+                                let values = &hello_module.values;
+                                assert_eq!(2, values.len());
+                                let val1 = values.get(0).unwrap();
+                                assert_eq!(-1025, *val1);
+                                let val2 = values.get(1).unwrap();
+                                assert_eq!(-1024, *val2);
+                            }
                             _ => {}
                         }
                     }
@@ -449,7 +553,7 @@ mod rdb_tests {
     }
     
     #[test]
-    fn test_module3() {
+    fn test_module2_skip() {
         let file = File::open("tests/rdb/dump-json-module.rdb").expect("file not found");
         let mut file = io::from_file(file);
         struct TestRdbHandler {}
