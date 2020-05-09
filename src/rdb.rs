@@ -31,14 +31,15 @@ pub(crate) fn parse(input: &mut Conn,
     input.read_exact(&mut bytes[..=3])?;
     let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
     let rdb_version = rdb_version.parse::<isize>().unwrap();
-    
-    let mut meta = Meta {
-        db: 0,
-        expire: None,
-        evict: None,
-    };
+    let mut db = 0;
     
     while input.running.load(Ordering::Relaxed) {
+        let mut meta = Meta {
+            db,
+            expire: None,
+            evict: None,
+        };
+        
         let data_type = input.read_u8()?;
         match data_type {
             RDB_OPCODE_AUX => {
@@ -49,16 +50,17 @@ pub(crate) fn parse(input: &mut Conn,
                 info!("{}:{}", field_name, field_val);
             }
             RDB_OPCODE_SELECTDB => {
-                let (db, _) = input.read_length()?;
-                meta.db = db;
-                let cmd = SELECT { db: db as i32 };
+                let (_db, _) = input.read_length()?;
+                meta.db = _db;
+                db = _db;
+                let cmd = SELECT { db: _db as i32 };
                 event_handler.handle(Event::AOF(Command::SELECT(&cmd)));
             }
             RDB_OPCODE_RESIZEDB => {
-                let (db, _) = input.read_length()?;
-                info!("db total keys: {}", db);
-                let (db, _) = input.read_length()?;
-                info!("db expired keys: {}", db);
+                let (total, _) = input.read_length()?;
+                info!("db[{}] total keys: {}", db, total);
+                let (expired, _) = input.read_length()?;
+                info!("db[{}] expired keys: {}", db, expired);
             }
             RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
                 if data_type == RDB_OPCODE_EXPIRETIME_MS {
@@ -406,7 +408,7 @@ pub struct Entry {
 #[derive(Debug)]
 pub struct Group {
     pub name: Vec<u8>,
-    pub last_id: ID
+    pub last_id: ID,
 }
 
 /// Map object types to RDB object types.
