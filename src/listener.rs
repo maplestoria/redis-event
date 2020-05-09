@@ -145,12 +145,12 @@ impl Listener {
                 if let Some(repl_id) = iter.nth(1) {
                     self.config.repl_id = repl_id.to_owned();
                 } else {
-                    panic!("Expect replication id, bot got None");
+                    panic!("Expect replication id, but got None");
                 }
                 if let Some(repl_offset) = iter.next() {
                     self.config.repl_offset = repl_offset.parse::<i64>().unwrap();
                 } else {
-                    panic!("Expect replication offset, bot got None");
+                    panic!("Expect replication offset, but got None");
                 }
                 return Ok(true);
             } else if resp.starts_with("CONTINUE") {

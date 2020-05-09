@@ -19,7 +19,6 @@ before_cache: |
   cargo install cargo-tarpaulin
 
 script:
-  - cargo clean
   - cargo build
   - cargo tarpaulin --out Xml
 
