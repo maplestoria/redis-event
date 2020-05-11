@@ -9,7 +9,7 @@
 
 ```
 [dependencies]
-redis-event = "1.0.1"
+redis-event = "1.0.2"
 ```
 
 ## 原理
