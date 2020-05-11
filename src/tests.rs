@@ -305,6 +305,9 @@ mod rdb_tests {
                                     } else {
                                         panic!("no evict");
                                     }
+                                    if let Some(_) = kv.meta.expire {
+                                        panic!("have expire");
+                                    }
                                 } else {
                                     panic!("unknown key");
                                 }
@@ -354,6 +357,9 @@ mod rdb_tests {
                                         assert_eq!(1, val);
                                     } else {
                                         panic!("no evict");
+                                    }
+                                    if let Some(_) = kv.meta.expire {
+                                        panic!("have expire");
                                     }
                                 } else {
                                     panic!("unknown key");
