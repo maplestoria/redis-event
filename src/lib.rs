@@ -48,18 +48,18 @@ redis_listener.start()?;
 [`Event`]: enum.Event.html
 */
 
-use std::io::{Result, Read};
+use std::io::{Read, Result};
 
 use crate::cmd::Command;
 use crate::rdb::{Module, Object};
 
 pub mod cmd;
 pub mod config;
-pub mod listener;
+mod io;
 mod iter;
+pub mod listener;
 mod lzf;
 pub mod rdb;
-mod io;
 mod tests;
 
 /// Redis事件监听器的定义，所有类型的监听器都实现此接口
@@ -96,12 +96,15 @@ impl EventHandler for NoOpEventHandler {
 
 /// Module Parser
 pub trait ModuleParser {
-    fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module>;
+    fn parse(
+        &mut self,
+        input: &mut dyn Read,
+        module_name: &str,
+        module_version: usize,
+    ) -> Box<dyn Module>;
 }
 
 /// 转换为utf-8字符串，不验证正确性
 fn to_string(bytes: Vec<u8>) -> String {
-    return unsafe {
-        String::from_utf8_unchecked(bytes)
-    };
+    return unsafe { String::from_utf8_unchecked(bytes) };
 }

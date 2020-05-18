@@ -48,7 +48,10 @@ pub(crate) fn parse_zadd(mut iter: Iter<Vec<u8>>) -> ZADD {
         } else {
             // score在前，element在后
             let member = iter.next().unwrap();
-            items.push(Item { score: next_arg, member });
+            items.push(Item {
+                score: next_arg,
+                member,
+            });
         }
     }
     ZADD {

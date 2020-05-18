@@ -10,7 +10,7 @@ use std::slice::Iter;
 
 #[derive(Debug)]
 pub struct FLUSHDB {
-    pub _async: Option<bool>
+    pub _async: Option<bool>,
 }
 
 pub(crate) fn parse_flushdb(mut iter: Iter<Vec<u8>>) -> FLUSHDB {
@@ -28,7 +28,7 @@ pub(crate) fn parse_flushdb(mut iter: Iter<Vec<u8>>) -> FLUSHDB {
 
 #[derive(Debug)]
 pub struct FLUSHALL {
-    pub _async: Option<bool>
+    pub _async: Option<bool>,
 }
 
 pub(crate) fn parse_flushall(mut iter: Iter<Vec<u8>>) -> FLUSHALL {

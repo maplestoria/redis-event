@@ -64,7 +64,11 @@ pub(crate) fn parse_smove(mut iter: Iter<Vec<u8>>) -> SMOVE {
     let source = iter.next().unwrap();
     let destination = iter.next().unwrap();
     let member = iter.next().unwrap();
-    SMOVE { source, destination, member }
+    SMOVE {
+        source,
+        destination,
+        member,
+    }
 }
 
 #[derive(Debug)]

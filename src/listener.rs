@@ -40,26 +40,25 @@
 /// // 启动程序
 /// redis_listener.start()?;
 /// ```
-
 use std::borrow::Borrow;
 use std::cell::{RefCell, RefMut};
 use std::io::{ErrorKind, Result};
 use std::net::TcpStream;
 use std::rc::Rc;
 use std::result::Result::Ok;
-use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info, warn};
 
-use crate::{cmd, EventHandler, io, ModuleParser, NoOpEventHandler, rdb, RedisListener, to_string};
 use crate::config::Config;
-use crate::io::{Conn, send};
+use crate::io::{send, Conn};
 use crate::rdb::Data;
 use crate::rdb::Data::Bytes;
+use crate::{cmd, io, rdb, to_string, EventHandler, ModuleParser, NoOpEventHandler, RedisListener};
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
@@ -76,9 +75,11 @@ impl Listener {
     /// 连接Redis，创建TCP连接
     fn connect(&mut self) -> Result<()> {
         let stream = TcpStream::connect(self.config.addr)?;
-        stream.set_read_timeout(self.config.read_timeout)
+        stream
+            .set_read_timeout(self.config.read_timeout)
             .expect("read timeout set failed");
-        stream.set_write_timeout(self.config.write_timeout)
+        stream
+            .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
         info!("connected to server {}", self.config.addr.to_string());
         let mut conn = io::new(stream, self.running.clone());
@@ -103,7 +104,7 @@ impl Listener {
         let conn = self.conn.as_mut().unwrap();
         let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
             Some(stream) => stream,
-            None => panic!("not tcp stream")
+            None => panic!("not tcp stream"),
         };
         let port = stream.local_addr()?.port().to_string();
         let port = port.as_bytes();
@@ -116,18 +117,18 @@ impl Listener {
     pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
         self.event_handler = handler
     }
-    
+
     pub fn set_module_parser(&mut self, parser: Rc<RefCell<dyn ModuleParser>>) {
         self.module_parser = Option::Some(parser)
     }
-    
+
     /// 开启replication
     /// 默认使用PSYNC命令，若不支持PSYNC则尝试使用SYNC命令
     fn start_sync(&mut self) -> Result<bool> {
         let offset = self.config.repl_offset.to_string();
         let repl_offset = offset.as_bytes();
         let repl_id = self.config.repl_id.as_bytes();
-        
+
         let conn = self.conn.as_mut().unwrap();
         conn.send(b"PSYNC", &[repl_id, repl_offset])?;
         let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
@@ -195,7 +196,12 @@ impl Listener {
         let cmd = conn.reply(io::read_bytes, &mut event_handler);
         let read_len = conn.unmark()?;
         self.config.repl_offset += read_len;
-        if let Err(error) = self.sender.as_ref().unwrap().send(Message::Some(self.config.repl_offset)) {
+        if let Err(error) = self
+            .sender
+            .as_ref()
+            .unwrap()
+            .send(Message::Some(self.config.repl_offset))
+        {
             error!("repl offset send error: {}", error);
         }
         return cmd;
@@ -208,12 +214,12 @@ impl Listener {
         let conn = self.conn.as_ref().unwrap();
         let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
             Some(stream) => stream,
-            None => panic!("not tcp stream")
+            None => panic!("not tcp stream"),
         };
         let mut stream_clone = stream.try_clone().unwrap();
-        
+
         let (sender, receiver) = mpsc::channel();
-        
+
         let t = thread::spawn(move || {
             let mut offset = 0;
             let mut timer = Instant::now();
@@ -231,7 +237,9 @@ impl Listener {
                 if elapsed.ge(&half_sec) {
                     let offset_str = offset.to_string();
                     let offset_bytes = offset_str.as_bytes();
-                    if let Err(error) = send(&mut stream_clone, b"REPLCONF", &[b"ACK", offset_bytes]) {
+                    if let Err(error) =
+                        send(&mut stream_clone, b"REPLCONF", &[b"ACK", offset_bytes])
+                    {
                         error!("heartbeat error: {}", error);
                         break;
                     }
@@ -271,7 +279,9 @@ impl RedisListener for Listener {
                     let mut handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
                     cmd::parse(data, &mut handler);
                 }
-                Err(ref err) if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut => {
+                Err(ref err)
+                    if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut =>
+                {
                     // 不管，连接是好的
                 }
                 Err(err) => return Err(err),
@@ -300,7 +310,7 @@ pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
     if conf.is_aof && !running.load(Ordering::Relaxed) {
         running.store(true, Ordering::Relaxed);
     }
-    
+
     Listener {
         config: conf,
         conn: Option::None,
@@ -313,7 +323,7 @@ pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
 }
 
 struct HeartbeatWorker {
-    thread: Option<thread::JoinHandle<()>>
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 enum Message {

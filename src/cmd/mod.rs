@@ -14,7 +14,6 @@
 */
 use std::cell::RefMut;
 
-use crate::{Event, EventHandler};
 use crate::cmd::connection::{SELECT, SWAPDB};
 use crate::cmd::hashes::*;
 use crate::cmd::hyperloglog::{PFADD, PFCOUNT, PFMERGE};
@@ -27,6 +26,7 @@ use crate::cmd::sets::*;
 use crate::cmd::sorted_sets::*;
 use crate::cmd::streams::{XACK, XADD, XCLAIM, XDEL, XGROUP, XTRIM};
 use crate::cmd::strings::*;
+use crate::{Event, EventHandler};
 
 pub mod connection;
 pub mod hashes;
@@ -38,8 +38,8 @@ pub mod scripting;
 pub mod server;
 pub mod sets;
 pub mod sorted_sets;
-pub mod strings;
 pub mod streams;
+pub mod strings;
 
 /// 所有支持的Redis命令
 ///

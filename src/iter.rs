@@ -4,7 +4,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::io::Conn;
-use crate::rdb::{Field, Item, read_zip_list_entry, read_zm_len};
+use crate::rdb::{read_zip_list_entry, read_zm_len, Field, Item};
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -141,13 +141,20 @@ impl ZipMapIter<'_> {
         let zm_len = read_zm_len(self.cursor)?;
         if zm_len == 255 {
             self.has_more = false;
-            return Ok(Field { name: field, value: Vec::new() });
+            return Ok(Field {
+                name: field,
+                value: Vec::new(),
+            });
         };
         let free = self.cursor.read_i8()?;
         let mut val = vec![0; zm_len];
         self.cursor.read_exact(&mut val)?;
-        self.cursor.set_position(self.cursor.position() + free as u64);
-        return Ok(Field { name: field, value: val });
+        self.cursor
+            .set_position(self.cursor.position() + free as u64);
+        return Ok(Field {
+            name: field,
+            value: val,
+        });
     }
 }
 

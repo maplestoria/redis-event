@@ -10,7 +10,7 @@ use std::slice::Iter;
 
 #[derive(Debug)]
 pub struct SELECT {
-    pub db: i32
+    pub db: i32,
 }
 
 pub(crate) fn parse_select(mut iter: Iter<Vec<u8>>) -> SELECT {

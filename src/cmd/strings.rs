@@ -65,35 +65,35 @@ pub enum Overflow {
 
 pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
     let key = iter.next().unwrap();
-    
+
     let mut statements = Vec::new();
     let mut overflows = Vec::new();
     while let Some(next_arg) = iter.next() {
         let arg_upper = &String::from_utf8_lossy(next_arg).to_uppercase();
         if arg_upper == "GET" {
-            let _type = iter.next()
-                .expect("bitfield 缺失get type");
-            let offset = iter.next()
-                .expect("bitfield 缺失get offset");
+            let _type = iter.next().expect("bitfield 缺失get type");
+            let offset = iter.next().expect("bitfield 缺失get offset");
             statements.push(Operation::GET(Get { _type, offset }));
         } else if arg_upper == "SET" {
             let _type = iter.next().unwrap();
-            let offset = iter.next()
-                .expect("bitfield 缺失SET offset");
-            let value = iter.next()
-                .expect("bitfield 缺失SET offset");
-            statements.push(Operation::SET(Set { _type, offset, value }));
+            let offset = iter.next().expect("bitfield 缺失SET offset");
+            let value = iter.next().expect("bitfield 缺失SET offset");
+            statements.push(Operation::SET(Set {
+                _type,
+                offset,
+                value,
+            }));
         } else if arg_upper == "INCRBY" {
-            let _type = iter.next()
-                .expect("bitfield 缺失INCR type");
-            let offset = iter.next()
-                .expect("bitfield 缺失INCR offset");
-            let increment = iter.next()
-                .expect("bitfield 缺失INCR offset");
-            statements.push(Operation::INCRBY(IncrBy { _type, offset, increment }));
+            let _type = iter.next().expect("bitfield 缺失INCR type");
+            let offset = iter.next().expect("bitfield 缺失INCR offset");
+            let increment = iter.next().expect("bitfield 缺失INCR offset");
+            statements.push(Operation::INCRBY(IncrBy {
+                _type,
+                offset,
+                increment,
+            }));
         } else if arg_upper == "OVERFLOW" {
-            let _type = String::from_utf8_lossy(iter.next()
-                .expect("bitfield 缺失OVERFLOW type"));
+            let _type = String::from_utf8_lossy(iter.next().expect("bitfield 缺失OVERFLOW type"));
             let type_upper = &_type.to_uppercase();
             if type_upper == "FAIL" {
                 overflows.push(Overflow::FAIL);
@@ -104,7 +104,7 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
             }
         }
     }
-    
+
     let _statements;
     if statements.is_empty() {
         _statements = None;
@@ -117,7 +117,11 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
     } else {
         _overflows = Some(overflows);
     }
-    BITFIELD { key, statements: _statements, overflows: _overflows }
+    BITFIELD {
+        key,
+        statements: _statements,
+        overflows: _overflows,
+    }
 }
 
 #[derive(Debug)]
@@ -137,8 +141,7 @@ pub enum Op {
 
 pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
     let operation;
-    let op = String::from_utf8_lossy(iter.next().unwrap())
-        .to_uppercase();
+    let op = String::from_utf8_lossy(iter.next().unwrap()).to_uppercase();
     if &op == "AND" {
         operation = AND;
     } else if &op == "OR" {
@@ -151,7 +154,7 @@ pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
         panic!("bitop命令缺失operation")
     }
     let dest_key = iter.next().unwrap();
-    
+
     let mut keys = Vec::new();
     while let Some(next_arg) = iter.next() {
         keys.push(next_arg);
@@ -159,7 +162,11 @@ pub(crate) fn parse_bitop(mut iter: Iter<Vec<u8>>) -> BITOP {
     if keys.is_empty() {
         panic!("bitop命令缺失input key")
     }
-    BITOP { operation, dest_key, keys }
+    BITOP {
+        operation,
+        dest_key,
+        keys,
+    }
 }
 
 #[derive(Debug)]
@@ -188,14 +195,14 @@ pub enum ExistType {
 
 pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     let key = iter.next().unwrap();
-    
+
     let value = iter.next().unwrap();
-    
+
     let mut expire_time = None;
     let mut expire_type = None;
     let mut exist_type = None;
     let mut expire = None;
-    
+
     for arg in iter {
         let arg_string = String::from_utf8_lossy(arg);
         let p_arg = &arg_string.to_uppercase();
@@ -215,7 +222,12 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     if expire_type.is_some() && expire_time.is_some() {
         expire = Some((expire_type.unwrap(), expire_time.unwrap()));
     }
-    SET { key, value, exist_type, expire }
+    SET {
+        key,
+        value,
+        exist_type,
+        expire,
+    }
 }
 
 #[derive(Debug)]
@@ -229,7 +241,11 @@ pub(crate) fn parse_setex(mut iter: Iter<Vec<u8>>) -> SETEX {
     let key = iter.next().unwrap();
     let seconds = iter.next().unwrap();
     let value = iter.next().unwrap();
-    SETEX { key, seconds, value }
+    SETEX {
+        key,
+        seconds,
+        value,
+    }
 }
 
 #[derive(Debug)]
@@ -255,7 +271,11 @@ pub(crate) fn parse_psetex(mut iter: Iter<Vec<u8>>) -> PSETEX {
     let key = iter.next().unwrap();
     let milliseconds = iter.next().unwrap();
     let value = iter.next().unwrap();
-    PSETEX { key, milliseconds, value }
+    PSETEX {
+        key,
+        milliseconds,
+        value,
+    }
 }
 
 #[derive(Debug)]
@@ -274,7 +294,7 @@ pub(crate) fn parse_setrange(mut iter: Iter<Vec<u8>>) -> SETRANGE {
 
 #[derive(Debug)]
 pub struct DECR<'a> {
-    pub key: &'a [u8]
+    pub key: &'a [u8],
 }
 
 pub(crate) fn parse_decr(mut iter: Iter<Vec<u8>>) -> DECR {
@@ -296,7 +316,7 @@ pub(crate) fn parse_decrby(mut iter: Iter<Vec<u8>>) -> DECRBY {
 
 #[derive(Debug)]
 pub struct INCR<'a> {
-    pub key: &'a [u8]
+    pub key: &'a [u8],
 }
 
 pub(crate) fn parse_incr(mut iter: Iter<Vec<u8>>) -> INCR {
@@ -324,7 +344,7 @@ pub struct KeyValue<'a> {
 
 #[derive(Debug)]
 pub struct MSET<'a> {
-    pub key_values: Vec<KeyValue<'a>>
+    pub key_values: Vec<KeyValue<'a>>,
 }
 
 pub(crate) fn parse_mset(mut iter: Iter<Vec<u8>>) -> MSET {
@@ -342,7 +362,7 @@ pub(crate) fn parse_mset(mut iter: Iter<Vec<u8>>) -> MSET {
 
 #[derive(Debug)]
 pub struct MSETNX<'a> {
-    pub key_values: Vec<KeyValue<'a>>
+    pub key_values: Vec<KeyValue<'a>>,
 }
 
 pub(crate) fn parse_msetnx(mut iter: Iter<Vec<u8>>) -> MSETNX {
@@ -357,7 +377,6 @@ pub(crate) fn parse_msetnx(mut iter: Iter<Vec<u8>>) -> MSETNX {
     }
     MSETNX { key_values }
 }
-
 
 #[derive(Debug)]
 pub struct SETBIT<'a> {

@@ -21,7 +21,11 @@ pub(crate) fn parse_brpoplpush(mut iter: Iter<Vec<u8>>) -> BRPOPLPUSH {
     let source = iter.next().unwrap();
     let destination = iter.next().unwrap();
     let timeout = iter.next().unwrap();
-    BRPOPLPUSH { source, destination, timeout }
+    BRPOPLPUSH {
+        source,
+        destination,
+        timeout,
+    }
 }
 
 #[derive(Debug)]
@@ -50,7 +54,12 @@ pub(crate) fn parse_linsert(mut iter: Iter<Vec<u8>>) -> LINSERT {
     }
     let pivot = iter.next().unwrap();
     let element = iter.next().unwrap();
-    LINSERT { key, position, pivot, element }
+    LINSERT {
+        key,
+        position,
+        pivot,
+        element,
+    }
 }
 
 #[derive(Debug)]
@@ -104,7 +113,11 @@ pub(crate) fn parse_lrem(mut iter: Iter<Vec<u8>>) -> LREM {
     let key = iter.next().unwrap();
     let count = iter.next().unwrap();
     let element = iter.next().unwrap();
-    LREM { key, count, element }
+    LREM {
+        key,
+        count,
+        element,
+    }
 }
 
 #[derive(Debug)]
@@ -118,7 +131,11 @@ pub(crate) fn parse_lset(mut iter: Iter<Vec<u8>>) -> LSET {
     let key = iter.next().unwrap();
     let index = iter.next().unwrap();
     let element = iter.next().unwrap();
-    LSET { key, index, element }
+    LSET {
+        key,
+        index,
+        element,
+    }
 }
 
 #[derive(Debug)]
@@ -154,7 +171,10 @@ pub struct RPOPLPUSH<'a> {
 pub(crate) fn parse_rpoplpush(mut iter: Iter<Vec<u8>>) -> RPOPLPUSH {
     let source = iter.next().unwrap();
     let destination = iter.next().unwrap();
-    RPOPLPUSH { source, destination }
+    RPOPLPUSH {
+        source,
+        destination,
+    }
 }
 
 #[derive(Debug)]

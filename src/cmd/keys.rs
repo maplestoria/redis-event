@@ -12,7 +12,7 @@ use crate::cmd::keys::ORDER::{ASC, DESC};
 
 #[derive(Debug)]
 pub struct DEL<'a> {
-    pub keys: Vec<&'a Vec<u8>>
+    pub keys: Vec<&'a Vec<u8>>,
 }
 
 pub(crate) fn parse_del(iter: Iter<Vec<u8>>) -> DEL {
@@ -25,7 +25,7 @@ pub(crate) fn parse_del(iter: Iter<Vec<u8>>) -> DEL {
 
 #[derive(Debug)]
 pub struct PERSIST<'a> {
-    pub key: &'a [u8]
+    pub key: &'a [u8],
 }
 
 pub(crate) fn parse_persist(mut iter: Iter<Vec<u8>>) -> PERSIST {
@@ -78,7 +78,10 @@ pub struct PEXPIREAT<'a> {
 pub(crate) fn parse_pexpireat(mut iter: Iter<Vec<u8>>) -> PEXPIREAT {
     let key = iter.next().unwrap();
     let mill_timestamp = iter.next().unwrap();
-    PEXPIREAT { key, mill_timestamp }
+    PEXPIREAT {
+        key,
+        mill_timestamp,
+    }
 }
 
 #[derive(Debug)]
@@ -159,7 +162,6 @@ pub(crate) fn parse_restore(mut iter: Iter<Vec<u8>>) -> RESTORE {
     }
 }
 
-
 #[derive(Debug)]
 pub struct SORT<'a> {
     pub key: &'a [u8],
@@ -192,7 +194,7 @@ pub(crate) fn parse_sort(mut iter: Iter<Vec<u8>>) -> SORT {
     let mut by_pattern = None;
     let mut patterns = Vec::new();
     let mut get_patterns = None;
-    
+
     while let Some(next_arg) = iter.next() {
         let arg_upper = String::from_utf8_lossy(next_arg).to_uppercase();
         if &arg_upper == "ASC" {
@@ -215,7 +217,7 @@ pub(crate) fn parse_sort(mut iter: Iter<Vec<u8>>) -> SORT {
             let next_pattern = iter.next().unwrap();
             patterns.push(next_pattern.as_slice());
         }
-    };
+    }
     if !patterns.is_empty() {
         get_patterns = Some(patterns);
     }
@@ -232,7 +234,7 @@ pub(crate) fn parse_sort(mut iter: Iter<Vec<u8>>) -> SORT {
 
 #[derive(Debug)]
 pub struct UNLINK<'a> {
-    pub keys: Vec<&'a [u8]>
+    pub keys: Vec<&'a [u8]>,
 }
 
 pub(crate) fn parse_unlink(mut iter: Iter<Vec<u8>>) -> UNLINK {

@@ -19,8 +19,7 @@ pub struct EVAL<'a> {
 pub(crate) fn parse_eval(mut iter: Iter<Vec<u8>>) -> EVAL {
     let script = iter.next().unwrap();
     let num_keys = iter.next().unwrap();
-    let num_keys = String::from_utf8_lossy(num_keys).parse::<i32>()
-        .unwrap();
+    let num_keys = String::from_utf8_lossy(num_keys).parse::<i32>().unwrap();
     let mut keys = Vec::with_capacity(num_keys as usize);
     for _ in 0..num_keys {
         let key = iter.next().unwrap();
@@ -30,7 +29,12 @@ pub(crate) fn parse_eval(mut iter: Iter<Vec<u8>>) -> EVAL {
     while let Some(arg) = iter.next() {
         args.push(arg.as_slice());
     }
-    EVAL { script, num_keys, keys, args }
+    EVAL {
+        script,
+        num_keys,
+        keys,
+        args,
+    }
 }
 
 #[derive(Debug)]
@@ -44,8 +48,7 @@ pub struct EVALSHA<'a> {
 pub(crate) fn parse_evalsha(mut iter: Iter<Vec<u8>>) -> EVALSHA {
     let sha1 = iter.next().unwrap();
     let num_keys = iter.next().unwrap();
-    let num_keys = String::from_utf8_lossy(num_keys).parse::<i32>()
-        .unwrap();
+    let num_keys = String::from_utf8_lossy(num_keys).parse::<i32>().unwrap();
     let mut keys = Vec::with_capacity(num_keys as usize);
     for _ in 0..num_keys {
         let key = iter.next().unwrap();
@@ -55,12 +58,17 @@ pub(crate) fn parse_evalsha(mut iter: Iter<Vec<u8>>) -> EVALSHA {
     while let Some(arg) = iter.next() {
         args.push(arg.as_slice());
     }
-    EVALSHA { sha1, num_keys, keys, args }
+    EVALSHA {
+        sha1,
+        num_keys,
+        keys,
+        args,
+    }
 }
 
 #[derive(Debug)]
 pub struct SCRIPTLOAD<'a> {
-    pub script: &'a [u8]
+    pub script: &'a [u8],
 }
 
 pub(crate) fn parse_script_load(mut iter: Iter<Vec<u8>>) -> SCRIPTLOAD {

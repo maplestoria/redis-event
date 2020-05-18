@@ -13,16 +13,18 @@ use std::sync::atomic::Ordering;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use log::info;
 
-use crate::{Event, EventHandler, to_string};
-use crate::cmd::Command;
 use crate::cmd::connection::SELECT;
+use crate::cmd::Command;
 use crate::io::Conn;
 use crate::rdb::Data::Empty;
+use crate::{to_string, Event, EventHandler};
 
 // 读取、解析rdb
-pub(crate) fn parse(input: &mut Conn,
-                    _: isize,
-                    mut event_handler: &mut RefMut<dyn EventHandler>) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
+pub(crate) fn parse(
+    input: &mut Conn,
+    _: isize,
+    mut event_handler: &mut RefMut<dyn EventHandler>,
+) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
     event_handler.handle(Event::RDB(Object::BOR));
     let mut bytes = vec![0; 5];
     // 开头5个字节: REDIS
@@ -32,14 +34,14 @@ pub(crate) fn parse(input: &mut Conn,
     let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
     let rdb_version = rdb_version.parse::<isize>().unwrap();
     let mut db = 0;
-    
+
     while input.running.load(Ordering::Relaxed) {
         let mut meta = Meta {
             db,
             expire: None,
             evict: None,
         };
-        
+
         let data_type = input.read_u8()?;
         match data_type {
             RDB_OPCODE_AUX => {
@@ -115,7 +117,7 @@ pub(crate) fn parse(input: &mut Conn,
                 input.read_object(data_type, &mut event_handler, &meta)?;
             }
         };
-    };
+    }
     event_handler.handle(Event::RDB(Object::EOR));
     Ok(Empty)
 }
@@ -200,9 +202,9 @@ pub enum Object<'a> {
     /// 代表Redis中的Hash类型数据
     Hash(Hash<'a>),
     /// 代表Redis中的module, 需要额外实现Module解析器
-    Module(Vec<u8>, Box<dyn Module>),
-    
-    Stream(Vec<u8>, Stream),
+    Module(Vec<u8>, Box<dyn Module>, &'a Meta),
+    /// 代表Redis中的Stream类型数据
+    Stream(Vec<u8>, Stream<'a>),
     /// 代表rdb数据解析开始
     BOR,
     /// 代表rdb数据解析完毕
@@ -322,9 +324,11 @@ pub struct Field {
 }
 
 #[derive(Debug)]
-pub struct Stream {
+pub struct Stream<'a> {
     pub entries: BTreeMap<ID, Entry>,
     pub groups: Vec<Group>,
+    /// 数据的元信息
+    pub meta: &'a Meta,
 }
 
 #[derive(Debug, Eq, Copy, Clone)]
@@ -343,7 +347,7 @@ impl PartialEq for ID {
     fn eq(&self, other: &Self) -> bool {
         self.ms == other.ms && self.seq == other.seq
     }
-    
+
     fn ne(&self, other: &Self) -> bool {
         self.ms != other.ms || self.seq != other.seq
     }
@@ -353,36 +357,36 @@ impl PartialOrd for ID {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
-    
+
     fn lt(&self, other: &Self) -> bool {
         match self.cmp(other) {
             cmp::Ordering::Less => true,
             cmp::Ordering::Equal => false,
-            cmp::Ordering::Greater => false
+            cmp::Ordering::Greater => false,
         }
     }
-    
+
     fn le(&self, other: &Self) -> bool {
         match self.cmp(other) {
             cmp::Ordering::Less => true,
             cmp::Ordering::Equal => true,
-            cmp::Ordering::Greater => false
+            cmp::Ordering::Greater => false,
         }
     }
-    
+
     fn gt(&self, other: &Self) -> bool {
         match self.cmp(other) {
             cmp::Ordering::Less => false,
             cmp::Ordering::Equal => false,
-            cmp::Ordering::Greater => true
+            cmp::Ordering::Greater => true,
         }
     }
-    
+
     fn ge(&self, other: &Self) -> bool {
         match self.cmp(other) {
             cmp::Ordering::Less => false,
             cmp::Ordering::Equal => true,
-            cmp::Ordering::Greater => true
+            cmp::Ordering::Greater => true,
         }
     }
 }

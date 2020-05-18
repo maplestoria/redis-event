@@ -24,11 +24,7 @@ pub(crate) fn parse_xack(mut iter: Iter<Vec<u8>>) -> XACK {
     for id in iter {
         ids.push(id);
     }
-    XACK {
-        key,
-        group,
-        ids,
-    }
+    XACK { key, group, ids }
 }
 
 #[derive(Debug)]
@@ -54,11 +50,7 @@ pub(crate) fn parse_xadd(mut iter: Iter<Vec<u8>>) -> XADD {
             break;
         }
     }
-    XADD {
-        key,
-        id,
-        fields,
-    }
+    XADD { key, id, fields }
 }
 
 #[derive(Debug)]
@@ -134,10 +126,7 @@ pub(crate) fn parse_xdel(mut iter: Iter<Vec<u8>>) -> XDEL {
     for id in iter {
         ids.push(id);
     }
-    XDEL {
-        key,
-        ids,
-    }
+    XDEL { key, ids }
 }
 
 #[derive(Debug)]
@@ -204,10 +193,7 @@ pub(crate) fn parse_xgroup(mut iter: Iter<Vec<u8>>) -> XGROUP {
         } else if p_arg == "DESTROY" {
             let key = iter.next().unwrap();
             let group_name = iter.next().unwrap();
-            destroy = Some(Destroy {
-                key,
-                group_name,
-            })
+            destroy = Some(Destroy { key, group_name })
         } else if p_arg == "DELCONSUMER" {
             let key = iter.next().unwrap();
             let group_name = iter.next().unwrap();
