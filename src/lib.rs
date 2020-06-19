@@ -60,12 +60,18 @@ mod iter;
 pub mod listener;
 mod lzf;
 pub mod rdb;
+mod resp;
 mod tests;
 
 /// Redis事件监听器的定义，所有类型的监听器都实现此接口
 pub trait RedisListener {
     /// 开启事件监听
     fn start(&mut self) -> Result<()>;
+}
+
+/// Redis RDB 解析器定义
+pub trait RDBParser {
+    fn parse(&mut self, input: &mut dyn Read, event_handler: &mut dyn EventHandler) -> Result<()>;
 }
 
 /// Redis事件

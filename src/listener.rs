@@ -89,6 +89,7 @@ impl Listener {
         self.conn = Option::Some(conn);
         Ok(())
     }
+    
     /// 如果有设置密码，将尝试使用此密码进行认证
     fn auth(&mut self) -> Result<()> {
         if !self.config.password.is_empty() {
@@ -99,6 +100,7 @@ impl Listener {
         }
         Ok(())
     }
+    
     /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
     fn send_port(&mut self) -> Result<()> {
         let conn = self.conn.as_mut().unwrap();
@@ -113,6 +115,7 @@ impl Listener {
         conn.reply(io::read_bytes, &mut event_handler)?;
         Ok(())
     }
+    
     /// 设置事件处理器
     pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
         self.event_handler = handler
@@ -188,6 +191,7 @@ impl Listener {
             panic!("Expect Redis string response");
         }
     }
+    
     /// 接收AOF，并处理replication offset发送到心跳线程
     fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
         let conn = self.conn.as_mut().unwrap();
@@ -206,6 +210,7 @@ impl Listener {
         }
         return cmd;
     }
+    
     /// 开启心跳
     fn start_heartbeat(&mut self) {
         if !self.is_running() {
@@ -251,6 +256,7 @@ impl Listener {
         self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
         self.sender = Some(sender);
     }
+    
     /// 获取当前运行的状态，若为false，程序将有序退出
     fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
