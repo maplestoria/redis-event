@@ -56,9 +56,10 @@ use log::{error, info, warn};
 
 use crate::config::Config;
 use crate::io::{send, Conn};
-use crate::rdb::Data;
-use crate::rdb::Data::Bytes;
-use crate::{cmd, io, rdb, to_string, EventHandler, ModuleParser, NoOpEventHandler, RedisListener};
+use crate::rdb::{Data, DefaultRDBParser};
+use crate::resp::{Resp, RespDecode, Type};
+use crate::{cmd, io, rdb, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
+use std::ops::DerefMut;
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
@@ -89,18 +90,17 @@ impl Listener {
         self.conn = Option::Some(conn);
         Ok(())
     }
-    
+
     /// 如果有设置密码，将尝试使用此密码进行认证
     fn auth(&mut self) -> Result<()> {
         if !self.config.password.is_empty() {
             let conn = self.conn.as_mut().unwrap();
             conn.send(b"AUTH", &[self.config.password.as_bytes()])?;
-            let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
-            conn.reply(io::read_bytes, &mut event_handler)?;
+            conn.input.decode_resp()?;
         }
         Ok(())
     }
-    
+
     /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
     fn send_port(&mut self) -> Result<()> {
         let conn = self.conn.as_mut().unwrap();
@@ -111,11 +111,10 @@ impl Listener {
         let port = stream.local_addr()?.port().to_string();
         let port = port.as_bytes();
         conn.send(b"REPLCONF", &[b"listening-port", port])?;
-        let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
-        conn.reply(io::read_bytes, &mut event_handler)?;
+        conn.input.decode_resp()?;
         Ok(())
     }
-    
+
     /// 设置事件处理器
     pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
         self.event_handler = handler
@@ -128,23 +127,38 @@ impl Listener {
     /// 开启replication
     /// 默认使用PSYNC命令，若不支持PSYNC则尝试使用SYNC命令
     fn start_sync(&mut self) -> Result<bool> {
+        let (next_step, length) = self.psync()?;
+        match next_step {
+            NextStep::FullSync => {
+                println!("Full Resync, length: {}", length);
+                let mut parser = DefaultRDBParser {
+                    running: Arc::clone(&self.running),
+                };
+                let conn = self.conn.as_mut().unwrap();
+                let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
+                parser.parse(&mut conn.input, length, event_handler.deref_mut())?;
+                Ok(true)
+            }
+            NextStep::PartialResync => {
+                info!("PSYNC进度恢复");
+                Ok(true)
+            }
+            NextStep::ChangeMode => Ok(false),
+            NextStep::Wait => Ok(false),
+        }
+    }
+
+    fn psync(&mut self) -> Result<(NextStep, i64)> {
         let offset = self.config.repl_offset.to_string();
         let repl_offset = offset.as_bytes();
         let repl_id = self.config.repl_id.as_bytes();
 
         let conn = self.conn.as_mut().unwrap();
         conn.send(b"PSYNC", &[repl_id, repl_offset])?;
-        let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
-        if let Bytes(resp) = conn.reply(io::read_bytes, &mut event_handler)? {
-            let resp = to_string(resp);
-            if resp.starts_with("FULLRESYNC") {
-                info!("Redis全量RDB准备接收, 等待Redis dump完成...");
-                if self.config.is_discard_rdb {
-                    info!("跳过RDB不进行处理");
-                    conn.reply(io::skip, &mut event_handler)?;
-                } else {
-                    conn.reply(rdb::parse, &mut event_handler)?;
-                }
+
+        if let Resp::String(resp) = conn.input.decode_resp()? {
+            info!("{}", resp);
+            let next = if resp.starts_with("FULLRESYNC") {
                 let mut iter = resp.split_whitespace();
                 if let Some(repl_id) = iter.nth(1) {
                     self.config.repl_id = repl_id.to_owned();
@@ -156,61 +170,38 @@ impl Listener {
                 } else {
                     panic!("Expect replication offset, but got None");
                 }
-                return Ok(true);
+                NextStep::FullSync
             } else if resp.starts_with("CONTINUE") {
-                // PSYNC 继续之前的offset
-                info!("PSYNC进度恢复");
                 let mut iter = resp.split_whitespace();
                 if let Some(repl_id) = iter.nth(1) {
                     if !repl_id.eq(&self.config.repl_id) {
                         self.config.repl_id = repl_id.to_owned();
                     }
                 }
-                return Ok(true);
+                NextStep::PartialResync
             } else if resp.starts_with("NOMASTERLINK") {
-                // redis丢失了master
-                warn!("{}", resp);
-                return Ok(false);
+                return Ok((NextStep::Wait, -1));
             } else if resp.starts_with("LOADING") {
-                info!("{}", resp);
-                // redis正在启动，加载rdb中
-                return Ok(false);
+                return Ok((NextStep::Wait, -1));
             } else {
-                info!("切换至SYNC模式重试");
-                // 不支持PSYNC命令，改用SYNC命令
-                conn.send(b"SYNC", &Vec::new())?;
-                if self.config.is_discard_rdb {
-                    info!("跳过RDB不进行处理");
-                    conn.reply(io::skip, &mut event_handler)?;
-                } else {
-                    conn.reply(rdb::parse, &mut event_handler)?;
+                return Ok((NextStep::Wait, -1));
+            };
+            if let Type::BulkBytes = conn.input.decode_type()? {
+                if let Resp::Int(length) = conn.input.decode_int()? {
+                    return Ok((next, length));
                 }
-                return Ok(true);
             }
+            panic!("Wrong data type");
         } else {
             panic!("Expect Redis string response");
         }
     }
-    
+
     /// 接收AOF，并处理replication offset发送到心跳线程
     fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-        let conn = self.conn.as_mut().unwrap();
-        conn.mark();
-        let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
-        let cmd = conn.reply(io::read_bytes, &mut event_handler);
-        let read_len = conn.unmark()?;
-        self.config.repl_offset += read_len;
-        if let Err(error) = self
-            .sender
-            .as_ref()
-            .unwrap()
-            .send(Message::Some(self.config.repl_offset))
-        {
-            error!("repl offset send error: {}", error);
-        }
-        return cmd;
+        unimplemented!()
     }
-    
+
     /// 开启心跳
     fn start_heartbeat(&mut self) {
         if !self.is_running() {
@@ -256,7 +247,7 @@ impl Listener {
         self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
         self.sender = Some(sender);
     }
-    
+
     /// 获取当前运行的状态，若为false，程序将有序退出
     fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -335,4 +326,11 @@ struct HeartbeatWorker {
 enum Message {
     Terminate,
     Some(i64),
+}
+
+enum NextStep {
+    FullSync,
+    PartialResync,
+    ChangeMode,
+    Wait,
 }

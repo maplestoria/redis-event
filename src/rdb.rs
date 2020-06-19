@@ -3,123 +3,464 @@ RDB中各项Redis数据相关的结构体定义，以及RDB解析相关的代码
 */
 use core::result;
 use std::any::Any;
+use std::borrow::BorrowMut;
 use std::cell::RefMut;
 use std::cmp;
 use std::collections::BTreeMap;
+use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::fmt::{Debug, Error, Formatter};
 use std::io::{Cursor, Read, Result};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use log::info;
 
 use crate::cmd::connection::SELECT;
 use crate::cmd::Command;
-use crate::io::Conn;
+use crate::io::{Conn, MODULE_SET};
+use crate::iter::{
+    IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter,
+};
 use crate::rdb::Data::Empty;
-use crate::{to_string, Event, EventHandler};
+use crate::resp::RespDecode;
+use crate::{lzf, to_string, Event, EventHandler, RDBParser};
+use std::sync::Arc;
 
-// 读取、解析rdb
-pub(crate) fn parse(
-    input: &mut Conn,
-    _: isize,
-    mut event_handler: &mut RefMut<dyn EventHandler>,
-) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-    event_handler.handle(Event::RDB(Object::BOR));
-    let mut bytes = vec![0; 5];
-    // 开头5个字节: REDIS
-    input.read_exact(&mut bytes)?;
-    // 4个字节: rdb版本
-    input.read_exact(&mut bytes[..=3])?;
-    let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
-    let rdb_version = rdb_version.parse::<isize>().unwrap();
-    let mut db = 0;
+pub(crate) struct DefaultRDBParser {
+    pub(crate) running: Arc<AtomicBool>,
+}
 
-    while input.running.load(Ordering::Relaxed) {
-        let mut meta = Meta {
-            db,
-            expire: None,
-            evict: None,
-        };
+impl RDBParser for DefaultRDBParser {
+    fn parse(
+        &mut self,
+        input: &mut dyn Read,
+        _: i64,
+        event_handler: &mut dyn EventHandler,
+    ) -> Result<()> {
+        event_handler.handle(Event::RDB(Object::BOR));
+        let mut bytes = vec![0; 5];
+        // 开头5个字节: REDIS
+        input.read_exact(&mut bytes)?;
+        // 4个字节: rdb版本
+        input.read_exact(&mut bytes[..=3])?;
+        let rdb_version = String::from_utf8_lossy(&bytes[..=3]);
+        let rdb_version = rdb_version.parse::<isize>().unwrap();
+        let mut db = 0;
 
-        let data_type = input.read_u8()?;
-        match data_type {
-            RDB_OPCODE_AUX => {
-                let field_name = input.read_string()?;
-                let field_val = input.read_string()?;
-                let field_name = to_string(field_name);
-                let field_val = to_string(field_val);
-                info!("{}:{}", field_name, field_val);
-            }
-            RDB_OPCODE_SELECTDB => {
-                let (_db, _) = input.read_length()?;
-                meta.db = _db;
-                db = _db;
-                let cmd = SELECT { db: _db as i32 };
-                event_handler.handle(Event::AOF(Command::SELECT(&cmd)));
-            }
-            RDB_OPCODE_RESIZEDB => {
-                let (total, _) = input.read_length()?;
-                info!("db[{}] total keys: {}", db, total);
-                let (expired, _) = input.read_length()?;
-                info!("db[{}] expired keys: {}", db, expired);
-            }
-            RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
-                if data_type == RDB_OPCODE_EXPIRETIME_MS {
-                    let expired_time = input.read_integer(8, false)?;
-                    meta.expire = Option::Some((ExpireType::Millisecond, expired_time as i64));
-                } else {
-                    let expired_time = input.read_integer(4, false)?;
-                    meta.expire = Option::Some((ExpireType::Second, expired_time as i64));
+        while self.running.load(Ordering::Relaxed) {
+            let mut meta = Meta {
+                db,
+                expire: None,
+                evict: None,
+            };
+
+            let data_type = input.read_u8()?;
+            match data_type {
+                RDB_OPCODE_AUX => {
+                    let field_name = input.read_string()?;
+                    let field_val = input.read_string()?;
+                    let field_name = to_string(field_name);
+                    let field_val = to_string(field_val);
+                    info!("{}:{}", field_name, field_val);
                 }
-                let value_type = input.read_u8()?;
-                match value_type {
-                    RDB_OPCODE_FREQ => {
-                        let val = input.read_u8()?;
-                        let value_type = input.read_u8()?;
-                        meta.evict = Option::Some((EvictType::LFU, val as i64));
-                        input.read_object(value_type, &mut event_handler, &meta)?;
+                RDB_OPCODE_SELECTDB => {
+                    let (_db, _) = input.read_length()?;
+                    meta.db = _db;
+                    db = _db;
+                    let cmd = SELECT { db: _db as i32 };
+                    event_handler.handle(Event::AOF(Command::SELECT(&cmd)));
+                }
+                RDB_OPCODE_RESIZEDB => {
+                    let (total, _) = input.read_length()?;
+                    info!("db[{}] total keys: {}", db, total);
+                    let (expired, _) = input.read_length()?;
+                    info!("db[{}] expired keys: {}", db, expired);
+                }
+                RDB_OPCODE_EXPIRETIME | RDB_OPCODE_EXPIRETIME_MS => {
+                    if data_type == RDB_OPCODE_EXPIRETIME_MS {
+                        let expired_time = input.read_integer(8, false)?;
+                        meta.expire = Option::Some((ExpireType::Millisecond, expired_time as i64));
+                    } else {
+                        let expired_time = input.read_integer(4, false)?;
+                        meta.expire = Option::Some((ExpireType::Second, expired_time as i64));
                     }
-                    RDB_OPCODE_IDLE => {
-                        let (val, _) = input.read_length()?;
-                        let value_type = input.read_u8()?;
-                        meta.evict = Option::Some((EvictType::LRU, val as i64));
-                        input.read_object(value_type, &mut event_handler, &meta)?;
-                    }
-                    _ => {
-                        input.read_object(value_type, &mut event_handler, &meta)?;
+                    let value_type = input.read_u8()?;
+                    match value_type {
+                        RDB_OPCODE_FREQ => {
+                            let val = input.read_u8()?;
+                            let value_type = input.read_u8()?;
+                            meta.evict = Option::Some((EvictType::LFU, val as i64));
+                            self.read_object(input, value_type, event_handler, &meta)?;
+                        }
+                        RDB_OPCODE_IDLE => {
+                            let (val, _) = input.read_length()?;
+                            let value_type = input.read_u8()?;
+                            meta.evict = Option::Some((EvictType::LRU, val as i64));
+                            self.read_object(input, value_type, event_handler, &meta)?;
+                        }
+                        _ => {
+                            self.read_object(input, value_type, event_handler, &meta)?;
+                        }
                     }
                 }
-            }
-            RDB_OPCODE_FREQ => {
-                let val = input.read_u8()?;
-                let value_type = input.read_u8()?;
-                meta.evict = Option::Some((EvictType::LFU, val as i64));
-                input.read_object(value_type, &mut event_handler, &meta)?;
-            }
-            RDB_OPCODE_IDLE => {
-                let (val, _) = input.read_length()?;
-                meta.evict = Option::Some((EvictType::LRU, val as i64));
-                let value_type = input.read_u8()?;
-                input.read_object(value_type, &mut event_handler, &meta)?;
-            }
-            RDB_OPCODE_MODULE_AUX => {
-                input.read_length()?;
-                input.rdb_load_check_module_value()?;
-            }
-            RDB_OPCODE_EOF => {
-                if rdb_version >= 5 {
-                    input.read_integer(8, true)?;
+                RDB_OPCODE_FREQ => {
+                    let val = input.read_u8()?;
+                    let value_type = input.read_u8()?;
+                    meta.evict = Option::Some((EvictType::LFU, val as i64));
+                    self.read_object(input, value_type, event_handler, &meta)?;
                 }
-                break;
-            }
-            _ => {
-                input.read_object(data_type, &mut event_handler, &meta)?;
-            }
-        };
+                RDB_OPCODE_IDLE => {
+                    let (val, _) = input.read_length()?;
+                    meta.evict = Option::Some((EvictType::LRU, val as i64));
+                    let value_type = input.read_u8()?;
+                    self.read_object(input, value_type, event_handler, &meta)?;
+                }
+                RDB_OPCODE_MODULE_AUX => unimplemented!(),
+                RDB_OPCODE_EOF => {
+                    if rdb_version >= 5 {
+                        input.read_integer(8, true)?;
+                    }
+                    break;
+                }
+                _ => {
+                    self.read_object(input, data_type, event_handler, &meta)?;
+                }
+            };
+        }
+        event_handler.handle(Event::RDB(Object::EOR));
+        Ok(())
     }
-    event_handler.handle(Event::RDB(Object::EOR));
-    Ok(Empty)
+}
+
+impl DefaultRDBParser {
+    // 根据传入的数据类型，从流中读取对应类型的数据
+    fn read_object(
+        &mut self,
+        input: &mut dyn Read,
+        value_type: u8,
+        event_handler: &mut dyn EventHandler,
+        meta: &Meta,
+    ) -> Result<()> {
+        match value_type {
+            RDB_TYPE_STRING => {
+                let key = input.read_string()?;
+                let value = input.read_string()?;
+                event_handler.handle(Event::RDB(Object::String(KeyValue {
+                    key: &key,
+                    value: &value,
+                    meta,
+                })));
+            }
+            RDB_TYPE_LIST | RDB_TYPE_SET => {
+                let key = input.read_string()?;
+                let (count, _) = input.read_length()?;
+                let mut iter = StrValIter { count, input };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        if value_type == RDB_TYPE_LIST {
+                            event_handler.handle(Event::RDB(Object::List(List {
+                                key: &key,
+                                values: &val,
+                                meta,
+                            })));
+                        } else {
+                            event_handler.handle(Event::RDB(Object::Set(Set {
+                                key: &key,
+                                members: &val,
+                                meta,
+                            })));
+                        }
+                    }
+                }
+            }
+            RDB_TYPE_ZSET => {
+                let key = input.read_string()?;
+                let (count, _) = input.read_length()?;
+                let mut iter = SortedSetIter { count, v: 1, input };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::SortedSet(SortedSet {
+                            key: &key,
+                            items: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_ZSET_2 => {
+                let key = input.read_string()?;
+                let (count, _) = input.read_length()?;
+                let mut iter = SortedSetIter { count, v: 2, input };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::SortedSet(SortedSet {
+                            key: &key,
+                            items: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_HASH => {
+                let key = input.read_string()?;
+                let (count, _) = input.read_length()?;
+                let mut iter = StrValIter {
+                    count: count * 2,
+                    input,
+                };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let name;
+                        let value;
+                        if let Ok(next_val) = iter.next() {
+                            name = next_val;
+                            value = iter.next().expect("missing hash field value");
+                            val.push(Field { name, value });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Hash(Hash {
+                            key: &key,
+                            fields: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_HASH_ZIPMAP => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(&bytes);
+                cursor.set_position(1);
+                let mut iter = ZipMapIter {
+                    has_more: true,
+                    cursor,
+                };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut fields = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(field) = iter.next() {
+                            fields.push(field);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !fields.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Hash(Hash {
+                            key: &key,
+                            fields: &fields,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_LIST_ZIPLIST => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::List(List {
+                            key: &key,
+                            values: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_HASH_ZIPLIST => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let name;
+                        let value;
+                        if let Ok(next_val) = iter.next() {
+                            name = next_val;
+                            value = iter.next().expect("missing hash field value");
+                            val.push(Field { name, value });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Hash(Hash {
+                            key: &key,
+                            fields: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_ZSET_ZIPLIST => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                // 跳过ZL_BYTES和ZL_TAIL
+                cursor.set_position(8);
+                let count = cursor.read_u16::<LittleEndian>()? as isize;
+                let mut iter = ZipListIter { count, cursor };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        let member;
+                        let score: f64;
+                        if let Ok(next_val) = iter.next() {
+                            member = next_val;
+                            let score_str =
+                                to_string(iter.next().expect("missing sorted set element's score"));
+                            score = score_str.parse::<f64>().unwrap();
+                            val.push(Item { member, score });
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::SortedSet(SortedSet {
+                            key: &key,
+                            items: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_SET_INTSET => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let mut cursor = Cursor::new(&bytes);
+                let encoding = cursor.read_i32::<LittleEndian>()?;
+                let length = cursor.read_u32::<LittleEndian>()?;
+                let mut iter = IntSetIter {
+                    encoding,
+                    count: length as isize,
+                    cursor: &mut cursor,
+                };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::Set(Set {
+                            key: &key,
+                            members: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_LIST_QUICKLIST => {
+                let key = input.read_string()?;
+                let (count, _) = input.read_length()?;
+                let mut iter = QuickListIter {
+                    len: -1,
+                    count,
+                    input,
+                    cursor: Option::None,
+                };
+
+                let mut has_more = true;
+                while has_more {
+                    let mut val = Vec::new();
+                    for _ in 0..BATCH_SIZE {
+                        if let Ok(next_val) = iter.next() {
+                            val.push(next_val);
+                        } else {
+                            has_more = false;
+                            break;
+                        }
+                    }
+                    if !val.is_empty() {
+                        event_handler.handle(Event::RDB(Object::List(List {
+                            key: &key,
+                            values: &val,
+                            meta,
+                        })));
+                    }
+                }
+            }
+            RDB_TYPE_MODULE | RDB_TYPE_MODULE_2 => unimplemented!(),
+            RDB_TYPE_STREAM_LISTPACKS => unimplemented!(),
+            _ => panic!("unknown data type: {}", value_type),
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize> {

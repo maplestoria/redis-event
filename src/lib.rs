@@ -71,7 +71,12 @@ pub trait RedisListener {
 
 /// Redis RDB 解析器定义
 pub trait RDBParser {
-    fn parse(&mut self, input: &mut dyn Read, event_handler: &mut dyn EventHandler) -> Result<()>;
+    fn parse(
+        &mut self,
+        input: &mut dyn Read,
+        length: i64,
+        event_handler: &mut dyn EventHandler,
+    ) -> Result<()>;
 }
 
 /// Redis事件
