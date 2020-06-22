@@ -63,7 +63,8 @@ pub trait RespDecode: Read {
         if let Resp::Int(i) = r {
             if i > 0 {
                 let mut buf = vec![0; i as usize];
-                self.read_exact(&mut buf)?;let mut end = vec![0; 2];
+                self.read_exact(&mut buf)?;
+                let mut end = vec![0; 2];
                 self.read_exact(&mut end)?;
                 if !end.eq(&[CR, LF]) {
                     panic!("Expected CRLF");
@@ -72,7 +73,7 @@ pub trait RespDecode: Read {
                 }
             } else {
                 self.read_exact(&mut [0; 2])?;
-                return Ok(Resp::BulkBytes(vec![0;0]));
+                return Ok(Resp::BulkBytes(vec![0; 0]));
             }
         } else {
             panic!("Expected Int Response");

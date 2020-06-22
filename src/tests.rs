@@ -763,18 +763,18 @@ mod rdb_tests {
 #[cfg(test)]
 mod aof_tests {
     use std::fs::File;
-    
+
     use crate::cmd::Command;
+    use crate::resp::{Resp, RespDecode};
     use crate::{cmd, Event, EventHandler};
-    use crate::resp::{RespDecode, Resp};
     use std::io::ErrorKind;
-    
+
     #[test]
     fn test_aof1() {
         let mut file = File::open("tests/aof/appendonly1.aof").expect("file not found");
-        
+
         struct TestCmdHandler {}
-        
+
         impl EventHandler for TestCmdHandler {
             fn handle(&mut self, cmd: Event) {
                 match cmd {
@@ -813,32 +813,252 @@ mod aof_tests {
                 }
             }
         }
-        
+
         let mut cmd_handler = TestCmdHandler {};
-        
+
         loop {
             match file.decode_resp() {
-                Ok(resp) => {
-                    match resp {
-                        Resp::Array(arr) => {
-                            let mut data = Vec::new();
-                            for x in arr {
-                                if let Resp::BulkBytes(bytes) = x{
-                                    data.push(bytes);
-                                } else {
-                                    panic!("wrong data type");
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
+                        panic!("err")
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_aof2() {
+        let mut file = File::open("tests/aof/appendonly2.aof").expect("file not found");
+
+        struct TestCmdHandler {
+            count: isize,
+        }
+
+        impl EventHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Event) {
+                match cmd {
+                    Event::RDB(_) => {}
+                    Event::AOF(cmd) => {
+                        if let Command::SET(set) = cmd {
+                            let key = String::from_utf8_lossy(set.key);
+                            if key.starts_with("test_") {
+                                self.count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut cmd_handler = TestCmdHandler { count: 0 };
+
+        loop {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
+                        panic!("err")
+                    }
+                }
+            }
+        }
+
+        assert_eq!(48000, cmd_handler.count);
+    }
+
+    #[test]
+    fn test_aof3() {
+        let mut file = File::open("tests/aof/appendonly3.aof").expect("file not found");
+
+        struct TestCmdHandler {
+            count: isize,
+        }
+
+        impl EventHandler for TestCmdHandler {
+            fn handle(&mut self, _cmd: Event) {
+                self.count += 1;
+            }
+        }
+
+        let mut cmd_handler = TestCmdHandler { count: 0 };
+        loop {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
+                        panic!("err")
+                    }
+                }
+            }
+        }
+        assert_eq!(92539, cmd_handler.count);
+    }
+
+    #[test]
+    fn test_aof5() {
+        let mut file = File::open("tests/aof/appendonly5.aof").expect("file not found");
+
+        struct TestCmdHandler {
+            count: isize,
+        }
+
+        impl EventHandler for TestCmdHandler {
+            fn handle(&mut self, _cmd: Event) {
+                self.count += 1;
+            }
+        }
+
+        let mut cmd_handler = TestCmdHandler { count: 0 };
+
+        loop {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
+                        panic!("err")
+                    }
+                }
+            }
+        }
+
+        assert_eq!(71, cmd_handler.count);
+    }
+
+    #[test]
+    fn test_aof6() {
+        let mut file = File::open("tests/aof/appendonly.aof").expect("file not found");
+
+        struct TestCmdHandler {}
+
+        impl EventHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Event) {
+                match cmd {
+                    Event::RDB(_) => {}
+                    Event::AOF(cmd) => match cmd {
+                        Command::XADD(xadd) => {
+                            let key = String::from_utf8_lossy(xadd.key);
+                            assert_eq!(key, "stream");
+                            for field in &xadd.fields {
+                                let name = String::from_utf8_lossy(field.name);
+                                let value = String::from_utf8_lossy(field.value);
+                                if "name" == name {
+                                    assert_eq!("tomcat", value);
+                                } else if "age" == name {
+                                    assert_eq!("18", value);
                                 }
                             }
-                            cmd::parse(data, &mut cmd_handler);
-                        },
-                        _ => {panic!("wrong resp type ")}
+                        }
+                        Command::XGROUP(xgroup) => {
+                            if let Some(create) = &xgroup.create {
+                                let key = String::from_utf8_lossy(create.key);
+                                assert_eq!("stream", key);
+                                let group = String::from_utf8_lossy(create.group_name);
+                                assert_eq!("group", group);
+                            }
+                        }
+                        Command::XTRIM(xtrim) => {
+                            assert_eq!(false, xtrim.approximation);
+                            assert_eq!(1, xtrim.count);
+                        }
+                        Command::XDEL(xdel) => {
+                            assert!(xdel.ids.len() == 1);
+                            let id = xdel.ids.get(0);
+                            let id = id.unwrap();
+                            let id = String::from_utf8_lossy(*id);
+                            assert_eq!("1588842699754-0", id);
+                        }
+                        _ => {}
+                    },
+                }
+            }
+        }
+
+        let mut cmd_handler = TestCmdHandler {};
+        loop {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
                     }
+                    _ => panic!("wrong resp type "),
                 },
-                Err(ref e) => if e.kind() == ErrorKind::UnexpectedEof {
-                    break
-                } else {
-                    panic!("err")
-                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
+                        panic!("err")
+                    }
+                }
             }
         }
     }
