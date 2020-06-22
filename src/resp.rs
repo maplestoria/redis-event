@@ -233,7 +233,7 @@ pub const MODULE_SET: [char; 64] = [
 #[cfg(test)]
 mod test {
     use crate::resp::{Resp, RespDecode};
-    use std::io::{Cursor, Error};
+    use std::io::Cursor;
 
     #[test]
     fn test_decode_array() {

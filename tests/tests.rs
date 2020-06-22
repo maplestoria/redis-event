@@ -760,8 +760,14 @@ fn test_aof() {
             write_timeout: None,
         };
         let running = Arc::new(AtomicBool::new(true));
-        let mut redis_listener = listener::new(conf, running);
-        redis_listener.set_event_handler(Rc::new(RefCell::new(cmd_handler)));
+
+        let mut builder = listener::Builder::new();
+        builder.with_config(conf);
+        builder.with_control_flag(running);
+        builder.with_event_handler(Rc::new(RefCell::new(cmd_handler)));
+
+        let mut redis_listener = builder.build();
+
         if let Err(_) = redis_listener.start() {
             println!("redis-server closed");
         }
@@ -844,8 +850,14 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
         write_timeout: None,
     };
     let running = Arc::new(AtomicBool::new(true));
-    let mut redis_listener = listener::new(conf, running);
-    redis_listener.set_event_handler(rdb_handler);
+
+    let mut builder = listener::Builder::new();
+    builder.with_config(conf);
+    builder.with_control_flag(running);
+    builder.with_event_handler(rdb_handler);
+
+    let mut redis_listener = builder.build();
+
     if let Err(error) = redis_listener.start() {
         eprintln!("error: {}", error);
         panic!(error)
