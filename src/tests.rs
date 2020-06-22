@@ -761,6 +761,90 @@ mod rdb_tests {
 }
 
 #[cfg(test)]
+mod aof_tests {
+    use std::fs::File;
+    
+    use crate::cmd::Command;
+    use crate::{cmd, Event, EventHandler};
+    use crate::resp::{RespDecode, Resp};
+    use std::io::ErrorKind;
+    
+    #[test]
+    fn test_aof1() {
+        let mut file = File::open("tests/aof/appendonly1.aof").expect("file not found");
+        
+        struct TestCmdHandler {}
+        
+        impl EventHandler for TestCmdHandler {
+            fn handle(&mut self, cmd: Event) {
+                match cmd {
+                    Event::RDB(_) => {}
+                    Event::AOF(cmd) => match cmd {
+                        Command::HMSET(hmset) => {
+                            let key = String::from_utf8_lossy(hmset.key);
+                            if "key".eq(&key) {
+                                for field in &hmset.fields {
+                                    let name = String::from_utf8_lossy(field.name);
+                                    if "field".eq(&name) {
+                                        let val = String::from_utf8_lossy(field.value);
+                                        assert_eq!("a", val);
+                                    } else if "field1".eq(&name) {
+                                        let val = String::from_utf8_lossy(field.value);
+                                        assert_eq!("b", val);
+                                    } else {
+                                        panic!("wrong name");
+                                    }
+                                }
+                            } else {
+                                panic!("wrong key");
+                            }
+                        }
+                        Command::SELECT(select) => {
+                            assert_eq!(0, select.db);
+                        }
+                        Command::SET(set) => {
+                            let key = String::from_utf8_lossy(set.key);
+                            let val = String::from_utf8_lossy(set.value);
+                            assert_eq!("a", key);
+                            assert_eq!("b", val);
+                        }
+                        _ => {}
+                    },
+                }
+            }
+        }
+        
+        let mut cmd_handler = TestCmdHandler {};
+        
+        loop {
+            match file.decode_resp() {
+                Ok(resp) => {
+                    match resp {
+                        Resp::Array(arr) => {
+                            let mut data = Vec::new();
+                            for x in arr {
+                                if let Resp::BulkBytes(bytes) = x{
+                                    data.push(bytes);
+                                } else {
+                                    panic!("wrong data type");
+                                }
+                            }
+                            cmd::parse(data, &mut cmd_handler);
+                        },
+                        _ => {panic!("wrong resp type ")}
+                    }
+                },
+                Err(ref e) => if e.kind() == ErrorKind::UnexpectedEof {
+                    break
+                } else {
+                    panic!("err")
+                },
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod other_tests {
     use crate::rdb::ID;
 
