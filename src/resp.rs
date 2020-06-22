@@ -201,6 +201,7 @@ pub enum Type {
     Array,
 }
 
+#[derive(Debug)]
 pub enum Resp {
     String(String),
     Int(i64),

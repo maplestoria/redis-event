@@ -58,7 +58,7 @@ use crate::config::Config;
 use crate::io::send;
 use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
-use crate::{io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
+use crate::{cmd, io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
@@ -67,7 +67,7 @@ pub struct Listener {
     rdb_parser: Rc<RefCell<dyn RDBParser>>,
     event_handler: Rc<RefCell<dyn EventHandler>>,
     module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
-    t_heartbeat: HeartbeatWorker,
+    heartbeat_thread: HeartbeatWorker,
     sender: Option<mpsc::Sender<Message>>,
     running: Arc<AtomicBool>,
 }
@@ -116,12 +116,24 @@ impl Listener {
         self.module_parser = Option::Some(parser)
     }
 
+    pub fn set_rdb_parser(&mut self, parser: Rc<RefCell<dyn RDBParser>>) {
+        self.rdb_parser = parser
+    }
+
     /// 开启replication
     /// 默认使用PSYNC命令，若不支持PSYNC则尝试使用SYNC命令
-    fn start_sync(&mut self) -> Result<bool> {
-        let (next_step, length) = self.psync()?;
+    fn start_sync(&mut self) -> Result<Mode> {
+        let (next_step, mut length) = self.psync()?;
         match next_step {
-            NextStep::FullSync => {
+            NextStep::FullSync | NextStep::ChangeMode => {
+                let mode;
+                if let NextStep::ChangeMode = next_step {
+                    info!("源Redis不支持PSYNC命令, 使用SYNC命令再次进行尝试");
+                    mode = Mode::Sync;
+                    length = self.sync()?;
+                } else {
+                    mode = Mode::PSync;
+                }
                 info!("Full Resync, size: {}bytes", length);
                 let mut conn = self.conn.as_mut().unwrap();
                 if self.config.is_discard_rdb {
@@ -132,14 +144,13 @@ impl Listener {
                     let mut rdb_parser = self.rdb_parser.borrow_mut();
                     rdb_parser.parse(&mut conn, length, event_handler.deref_mut())?;
                 }
-                Ok(true)
+                Ok(mode)
             }
             NextStep::PartialResync => {
                 info!("PSYNC进度恢复");
-                Ok(true)
+                Ok(Mode::PSync)
             }
-            NextStep::ChangeMode => Ok(false),
-            NextStep::Wait => Ok(false),
+            NextStep::Wait => Ok(Mode::Wait),
         }
     }
 
@@ -151,54 +162,78 @@ impl Listener {
         let mut conn = self.conn.as_mut().unwrap();
         send(&mut conn, b"PSYNC", &[repl_id, repl_offset])?;
 
-        if let Resp::String(resp) = conn.decode_resp()? {
-            info!("{}", resp);
-            if resp.starts_with("FULLRESYNC") {
-                let mut iter = resp.split_whitespace();
-                if let Some(repl_id) = iter.nth(1) {
-                    self.config.repl_id = repl_id.to_owned();
-                } else {
-                    panic!("Expect replication id, but got None");
-                }
-                if let Some(repl_offset) = iter.next() {
-                    self.config.repl_offset = repl_offset.parse::<i64>().unwrap();
-                } else {
-                    panic!("Expect replication offset, but got None");
-                }
-                info!("等待Redis dump完成...");
-                if let Type::BulkBytes = conn.decode_type()? {
-                    if let Resp::Int(length) = conn.decode_int()? {
-                        return Ok((NextStep::FullSync, length));
-                    } else {
-                        panic!("Expect int response")
+        match conn.decode_resp() {
+            Ok(response) => {
+                if let Resp::String(resp) = &response {
+                    info!("{}", resp);
+                    if resp.starts_with("FULLRESYNC") {
+                        let mut iter = resp.split_whitespace();
+                        if let Some(repl_id) = iter.nth(1) {
+                            self.config.repl_id = repl_id.to_owned();
+                        } else {
+                            panic!("Expect replication id, but got None");
+                        }
+                        if let Some(repl_offset) = iter.next() {
+                            self.config.repl_offset = repl_offset.parse::<i64>().unwrap();
+                        } else {
+                            panic!("Expect replication offset, but got None");
+                        }
+                        info!("等待Redis dump完成...");
+                        if let Type::BulkBytes = conn.decode_type()? {
+                            if let Resp::Int(length) = conn.decode_int()? {
+                                return Ok((NextStep::FullSync, length));
+                            } else {
+                                panic!("Expect int response")
+                            }
+                        } else {
+                            panic!("Expect BulkString response");
+                        }
+                    } else if resp.starts_with("CONTINUE") {
+                        let mut iter = resp.split_whitespace();
+                        if let Some(repl_id) = iter.nth(1) {
+                            if !repl_id.eq(&self.config.repl_id) {
+                                self.config.repl_id = repl_id.to_owned();
+                            }
+                        }
+                        return Ok((NextStep::PartialResync, -1));
+                    } else if resp.starts_with("NOMASTERLINK") {
+                        return Ok((NextStep::Wait, -1));
+                    } else if resp.starts_with("LOADING") {
+                        return Ok((NextStep::Wait, -1));
                     }
+                }
+                panic!("Unexpected Response: {:?}", response);
+            }
+            Err(error) => {
+                if error.to_string().eq("ERR unknown command 'PSYNC'") {
+                    return Ok((NextStep::ChangeMode, -1));
                 } else {
-                    panic!("Expect BulkString response");
+                    return Err(error);
                 }
-            } else if resp.starts_with("CONTINUE") {
-                let mut iter = resp.split_whitespace();
-                if let Some(repl_id) = iter.nth(1) {
-                    if !repl_id.eq(&self.config.repl_id) {
-                        self.config.repl_id = repl_id.to_owned();
-                    }
-                }
-                return Ok((NextStep::PartialResync, -1));
-            } else if resp.starts_with("NOMASTERLINK") {
-                return Ok((NextStep::Wait, -1));
-            } else if resp.starts_with("LOADING") {
-                return Ok((NextStep::Wait, -1));
+            }
+        }
+    }
+
+    fn sync(&mut self) -> Result<i64> {
+        let mut conn = self.conn.as_mut().unwrap();
+        send(&mut conn, b"SYNC", &vec![])?;
+        if let Type::BulkBytes = conn.decode_type()? {
+            if let Resp::Int(length) = conn.decode_int()? {
+                return Ok(length);
             } else {
-                // TODO
-                return Ok((NextStep::ChangeMode, -1));
-            };
+                panic!("Expect int response")
+            }
         } else {
-            panic!("Expect Redis string response");
+            panic!("Expect BulkString response");
         }
     }
 
     /// 开启心跳
-    fn start_heartbeat(&mut self) {
+    fn start_heartbeat(&mut self, mode: &Mode) {
         if !self.is_running() {
+            return;
+        }
+        if let Mode::Sync = mode {
             return;
         }
         let conn = self.conn.as_ref().unwrap();
@@ -233,8 +268,43 @@ impl Listener {
             }
             info!("heartbeat thread terminated");
         });
-        self.t_heartbeat = HeartbeatWorker { thread: Some(t) };
+        self.heartbeat_thread = HeartbeatWorker { thread: Some(t) };
         self.sender = Some(sender);
+    }
+
+    fn receive_aof(&mut self, mode: &Mode) -> Result<()> {
+        let mut conn = self.conn.as_ref().unwrap();
+        let mut reader = io::CountReader::new(&mut conn);
+        let mut handler = self.event_handler.as_ref().borrow_mut();
+        while self.is_running() {
+            reader.mark();
+            if let Resp::Array(array) = reader.decode_resp()? {
+                let size = reader.reset()?;
+                let mut vec = Vec::with_capacity(array.len());
+                for x in array {
+                    if let Resp::BulkBytes(bytes) = x {
+                        vec.push(bytes);
+                    } else {
+                        panic!("Expected BulkString response");
+                    }
+                }
+                self.config.repl_offset += size;
+                if let Mode::PSync = mode {
+                    if let Err(error) = self
+                        .sender
+                        .as_ref()
+                        .unwrap()
+                        .send(Message::Some(self.config.repl_offset))
+                    {
+                        error!("repl offset send error: {}", error);
+                    }
+                }
+                cmd::parse(vec, handler.deref_mut());
+            } else {
+                panic!("Expected array response");
+            }
+        }
+        Ok(())
     }
 
     /// 获取当前运行的状态，若为false，程序将有序退出
@@ -251,43 +321,27 @@ impl RedisListener for Listener {
         self.connect()?;
         self.auth()?;
         self.send_port()?;
-        while !self.start_sync()? && self.is_running() {
-            sleep(Duration::from_secs(5));
-        }
-        if !self.config.is_aof {
-            return Ok(());
-        }
-        self.start_heartbeat();
-        let mut conn = self.conn.as_ref().unwrap();
-        let mut reader = io::CountReader::new(&mut conn);
-        while self.is_running() {
-            reader.mark();
-            if let Resp::Array(array) = reader.decode_resp()? {
-                let size = reader.reset()?;
-                info!("read aof: {}bytes", size);
-                let mut vec = Vec::with_capacity(array.len());
-                for x in array {
-                    if let Resp::BulkBytes(bytes) = x {
-                        vec.push(bytes);
+        let mut mode;
+        loop {
+            mode = self.start_sync()?;
+            match mode {
+                Mode::Wait => {
+                    if self.is_running() {
+                        sleep(Duration::from_secs(5));
                     } else {
-                        panic!("Expected BulkString response");
+                        return Ok(());
                     }
                 }
-                self.config.repl_offset += size;
-                if let Err(error) = self
-                    .sender
-                    .as_ref()
-                    .unwrap()
-                    .send(Message::Some(self.config.repl_offset))
-                {
-                    error!("repl offset send error: {}", error);
-                }
-                info!("{:?}", vec);
-            } else {
-                panic!("Expected array response");
+                _ => break,
             }
         }
-        Ok(())
+        if !self.config.is_aof {
+            Ok(())
+        } else {
+            self.start_heartbeat(&mode);
+            self.receive_aof(&mode)?;
+            Ok(())
+        }
     }
 }
 
@@ -298,7 +352,7 @@ impl Drop for Listener {
                 error!("Closing heartbeat thread error: {}", err)
             }
         }
-        if let Some(thread) = self.t_heartbeat.thread.take() {
+        if let Some(thread) = self.heartbeat_thread.thread.take() {
             if let Err(_) = thread.join() {}
         }
     }
@@ -318,7 +372,7 @@ pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
         })),
         event_handler: Rc::new(RefCell::new(NoOpEventHandler {})),
         module_parser: None,
-        t_heartbeat: HeartbeatWorker { thread: None },
+        heartbeat_thread: HeartbeatWorker { thread: None },
         sender: None,
         running,
     }
@@ -337,5 +391,11 @@ enum NextStep {
     FullSync,
     PartialResync,
     ChangeMode,
+    Wait,
+}
+
+enum Mode {
+    PSync,
+    Sync,
     Wait,
 }

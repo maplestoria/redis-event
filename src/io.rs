@@ -4,8 +4,7 @@
 
 use crate::resp::*;
 use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
-use log::info;
-use std::io::{BufWriter, Error, ErrorKind, Read, Result, Write};
+use std::io::{Error, ErrorKind, Read, Result, Write};
 
 pub(crate) struct CountReader<'a> {
     input: &'a mut dyn Read,
@@ -16,7 +15,6 @@ pub(crate) struct CountReader<'a> {
 impl Read for CountReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = self.input.read(buf)?;
-        info!("CountReader read {}bytes", len);
         if self.marked {
             self.len += len as i64;
         };
@@ -25,7 +23,6 @@ impl Read for CountReader<'_> {
 
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
         self.input.read_exact(buf)?;
-        info!("CountReader read_exact {}bytes", buf.len());
         if self.marked {
             self.len += buf.len() as i64;
         };

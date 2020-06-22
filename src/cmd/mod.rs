@@ -12,8 +12,6 @@
 [Command]: enum.Command.html
 [Redis Command Reference]: https://redis.io/commands
 */
-use std::cell::RefMut;
-
 use crate::cmd::connection::{SELECT, SWAPDB};
 use crate::cmd::hashes::*;
 use crate::cmd::hyperloglog::{PFADD, PFCOUNT, PFMERGE};
@@ -136,7 +134,7 @@ pub struct RawCommand {
     pub args: Vec<Vec<u8>>,
 }
 
-pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut RefMut<dyn EventHandler>) {
+pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut dyn EventHandler) {
     let mut iter = data.iter();
     if let Some(cmd_name) = iter.next() {
         let cmd_name = String::from_utf8_lossy(cmd_name).to_uppercase();
