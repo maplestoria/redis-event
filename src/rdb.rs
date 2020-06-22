@@ -3,11 +3,8 @@ RDB中各项Redis数据相关的结构体定义，以及RDB解析相关的代码
 */
 use core::result;
 use std::any::Any;
-use std::borrow::BorrowMut;
-use std::cell::RefMut;
 use std::cmp;
 use std::collections::BTreeMap;
-use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::fmt::{Debug, Error, Formatter};
 use std::io::{Cursor, Read, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,13 +14,11 @@ use log::info;
 
 use crate::cmd::connection::SELECT;
 use crate::cmd::Command;
-use crate::io::{Conn, MODULE_SET};
 use crate::iter::{
     IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter,
 };
-use crate::rdb::Data::Empty;
 use crate::resp::RespDecode;
-use crate::{lzf, to_string, Event, EventHandler, RDBParser};
+use crate::{to_string, Event, EventHandler, RDBParser};
 use std::sync::Arc;
 
 pub(crate) struct DefaultRDBParser {
@@ -115,7 +110,10 @@ impl RDBParser for DefaultRDBParser {
                     let value_type = input.read_u8()?;
                     self.read_object(input, value_type, event_handler, &meta)?;
                 }
-                RDB_OPCODE_MODULE_AUX => unimplemented!(),
+                RDB_OPCODE_MODULE_AUX => {
+                    // TODO
+                    unimplemented!()
+                }
                 RDB_OPCODE_EOF => {
                     if rdb_version >= 5 {
                         input.read_integer(8, true)?;
@@ -455,8 +453,14 @@ impl DefaultRDBParser {
                     }
                 }
             }
-            RDB_TYPE_MODULE | RDB_TYPE_MODULE_2 => unimplemented!(),
-            RDB_TYPE_STREAM_LISTPACKS => unimplemented!(),
+            RDB_TYPE_MODULE | RDB_TYPE_MODULE_2 => {
+                // TODO
+                unimplemented!()
+            }
+            RDB_TYPE_STREAM_LISTPACKS => {
+                // TODO
+                unimplemented!()
+            }
             _ => panic!("unknown data type: {}", value_type),
         }
         Ok(())
@@ -848,13 +852,3 @@ pub(crate) const RDB_ENC_INT32: isize = 2;
 /// string compressed with FASTLZ
 pub(crate) const RDB_ENC_LZF: isize = 3;
 pub(crate) const BATCH_SIZE: usize = 64;
-
-// 用于包装redis的返回值
-pub(crate) enum Data<B, V> {
-    // 包装Vec<u8>
-    Bytes(B),
-    // 包装Vec<Vec<u8>>
-    BytesVec(V),
-    // 空返回
-    Empty,
-}

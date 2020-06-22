@@ -2,13 +2,8 @@ use std::io::{Cursor, Error, ErrorKind, Read, Result};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 
-use crate::io::{COLON, CR, DOLLAR, LF, MINUS, MODULE_SET, PLUS, STAR};
-use crate::iter::{
-    IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter,
-};
 use crate::rdb::*;
-use crate::{lzf, to_string, Event, EventHandler};
-use std::borrow::BorrowMut;
+use crate::{lzf, to_string};
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 
 pub trait RespDecode: Read {
@@ -75,8 +70,9 @@ pub trait RespDecode: Read {
             } else {
                 return Ok(Resp::BulkBytes(buf));
             }
+        } else {
+            panic!("Expected Int Response");
         }
-        panic!("Excepted Int Response");
     }
 
     fn decode_array(&mut self) -> Result<Resp> {
@@ -88,8 +84,9 @@ pub trait RespDecode: Read {
                 arr.push(resp);
             }
             return Ok(Resp::Array(arr));
+        } else {
+            panic!("Expected Int Response");
         }
-        panic!("Excepted Int Response");
     }
 
     // 读取redis响应中下一条数据的长度
@@ -210,6 +207,27 @@ pub enum Resp {
     BulkBytes(Vec<u8>),
     Array(Vec<Resp>),
 }
+
+// 回车换行，在redis响应中一般表示终结符，或用作分隔符以分隔数据
+pub(crate) const CR: u8 = b'\r';
+pub(crate) const LF: u8 = b'\n';
+// 代表array响应
+pub(crate) const STAR: u8 = b'*';
+// 代表bulk string响应
+pub(crate) const DOLLAR: u8 = b'$';
+// 代表simple string响应
+pub(crate) const PLUS: u8 = b'+';
+// 代表error响应
+pub(crate) const MINUS: u8 = b'-';
+// 代表integer响应
+pub(crate) const COLON: u8 = b':';
+
+pub const MODULE_SET: [char; 64] = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
+    'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4',
+    '5', '6', '7', '8', '9', '-', '_',
+];
 
 #[cfg(test)]
 mod test {

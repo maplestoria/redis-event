@@ -40,10 +40,10 @@
 /// // 启动程序
 /// redis_listener.start()?;
 /// ```
-use std::borrow::Borrow;
-use std::cell::{RefCell, RefMut};
-use std::io::{ErrorKind, Result};
+use std::cell::RefCell;
+use std::io::Result;
 use std::net::TcpStream;
+use std::ops::DerefMut;
 use std::rc::Rc;
 use std::result::Result::Ok;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,19 +52,19 @@ use std::thread;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use log::{error, info, warn};
+use log::{error, info};
 
 use crate::config::Config;
-use crate::io::{send, Conn};
-use crate::rdb::{Data, DefaultRDBParser};
+use crate::io::send;
+use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
-use crate::{cmd, io, rdb, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
-use std::ops::DerefMut;
+use crate::{io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
     pub config: Config,
-    conn: Option<Conn>,
+    conn: Option<TcpStream>,
+    rdb_parser: Rc<RefCell<dyn RDBParser>>,
     event_handler: Rc<RefCell<dyn EventHandler>>,
     module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
     t_heartbeat: HeartbeatWorker,
@@ -83,35 +83,27 @@ impl Listener {
             .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
         info!("connected to server {}", self.config.addr.to_string());
-        let mut conn = io::new(stream, self.running.clone());
-        if let Some(parser) = &self.module_parser {
-            conn.module_parser = Option::Some(parser.clone());
-        }
-        self.conn = Option::Some(conn);
+        self.conn = Option::Some(stream);
         Ok(())
     }
 
     /// 如果有设置密码，将尝试使用此密码进行认证
     fn auth(&mut self) -> Result<()> {
         if !self.config.password.is_empty() {
-            let conn = self.conn.as_mut().unwrap();
-            conn.send(b"AUTH", &[self.config.password.as_bytes()])?;
-            conn.input.decode_resp()?;
+            let mut conn = self.conn.as_mut().unwrap();
+            send(&mut conn, b"AUTH", &[self.config.password.as_bytes()])?;
+            conn.decode_resp()?;
         }
         Ok(())
     }
 
     /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
     fn send_port(&mut self) -> Result<()> {
-        let conn = self.conn.as_mut().unwrap();
-        let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
-            Some(stream) => stream,
-            None => panic!("not tcp stream"),
-        };
-        let port = stream.local_addr()?.port().to_string();
+        let mut conn = self.conn.as_mut().unwrap();
+        let port = conn.local_addr()?.port().to_string();
         let port = port.as_bytes();
-        conn.send(b"REPLCONF", &[b"listening-port", port])?;
-        conn.input.decode_resp()?;
+        send(&mut conn, b"REPLCONF", &[b"listening-port", port])?;
+        conn.decode_resp()?;
         Ok(())
     }
 
@@ -130,13 +122,16 @@ impl Listener {
         let (next_step, length) = self.psync()?;
         match next_step {
             NextStep::FullSync => {
-                println!("Full Resync, length: {}", length);
-                let mut parser = DefaultRDBParser {
-                    running: Arc::clone(&self.running),
-                };
-                let conn = self.conn.as_mut().unwrap();
-                let mut event_handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
-                parser.parse(&mut conn.input, length, event_handler.deref_mut())?;
+                info!("Full Resync, size: {}bytes", length);
+                let mut conn = self.conn.as_mut().unwrap();
+                if self.config.is_discard_rdb {
+                    info!("跳过RDB不进行处理");
+                    io::skip(&mut conn, length as isize)?;
+                } else {
+                    let mut event_handler = self.event_handler.borrow_mut();
+                    let mut rdb_parser = self.rdb_parser.borrow_mut();
+                    rdb_parser.parse(&mut conn, length, event_handler.deref_mut())?;
+                }
                 Ok(true)
             }
             NextStep::PartialResync => {
@@ -153,12 +148,12 @@ impl Listener {
         let repl_offset = offset.as_bytes();
         let repl_id = self.config.repl_id.as_bytes();
 
-        let conn = self.conn.as_mut().unwrap();
-        conn.send(b"PSYNC", &[repl_id, repl_offset])?;
+        let mut conn = self.conn.as_mut().unwrap();
+        send(&mut conn, b"PSYNC", &[repl_id, repl_offset])?;
 
-        if let Resp::String(resp) = conn.input.decode_resp()? {
+        if let Resp::String(resp) = conn.decode_resp()? {
             info!("{}", resp);
-            let next = if resp.starts_with("FULLRESYNC") {
+            if resp.starts_with("FULLRESYNC") {
                 let mut iter = resp.split_whitespace();
                 if let Some(repl_id) = iter.nth(1) {
                     self.config.repl_id = repl_id.to_owned();
@@ -170,7 +165,16 @@ impl Listener {
                 } else {
                     panic!("Expect replication offset, but got None");
                 }
-                NextStep::FullSync
+                info!("等待Redis dump完成...");
+                if let Type::BulkBytes = conn.decode_type()? {
+                    if let Resp::Int(length) = conn.decode_int()? {
+                        return Ok((NextStep::FullSync, length));
+                    } else {
+                        panic!("Expect int response")
+                    }
+                } else {
+                    panic!("Expect BulkString response");
+                }
             } else if resp.starts_with("CONTINUE") {
                 let mut iter = resp.split_whitespace();
                 if let Some(repl_id) = iter.nth(1) {
@@ -178,28 +182,18 @@ impl Listener {
                         self.config.repl_id = repl_id.to_owned();
                     }
                 }
-                NextStep::PartialResync
+                return Ok((NextStep::PartialResync, -1));
             } else if resp.starts_with("NOMASTERLINK") {
                 return Ok((NextStep::Wait, -1));
             } else if resp.starts_with("LOADING") {
                 return Ok((NextStep::Wait, -1));
             } else {
-                return Ok((NextStep::Wait, -1));
+                // TODO
+                return Ok((NextStep::ChangeMode, -1));
             };
-            if let Type::BulkBytes = conn.input.decode_type()? {
-                if let Resp::Int(length) = conn.input.decode_int()? {
-                    return Ok((next, length));
-                }
-            }
-            panic!("Wrong data type");
         } else {
             panic!("Expect Redis string response");
         }
-    }
-
-    /// 接收AOF，并处理replication offset发送到心跳线程
-    fn receive_cmd(&mut self) -> Result<Data<Vec<u8>, Vec<Vec<u8>>>> {
-        unimplemented!()
     }
 
     /// 开启心跳
@@ -208,11 +202,7 @@ impl Listener {
             return;
         }
         let conn = self.conn.as_ref().unwrap();
-        let stream: &TcpStream = match conn.input.as_any().borrow().downcast_ref::<TcpStream>() {
-            Some(stream) => stream,
-            None => panic!("not tcp stream"),
-        };
-        let mut stream_clone = stream.try_clone().unwrap();
+        let mut conn_clone = conn.try_clone().unwrap();
 
         let (sender, receiver) = mpsc::channel();
 
@@ -233,8 +223,7 @@ impl Listener {
                 if elapsed.ge(&half_sec) {
                     let offset_str = offset.to_string();
                     let offset_bytes = offset_str.as_bytes();
-                    if let Err(error) =
-                        send(&mut stream_clone, b"REPLCONF", &[b"ACK", offset_bytes])
+                    if let Err(error) = send(&mut conn_clone, b"REPLCONF", &[b"ACK", offset_bytes])
                     {
                         error!("heartbeat error: {}", error);
                         break;
@@ -269,20 +258,33 @@ impl RedisListener for Listener {
             return Ok(());
         }
         self.start_heartbeat();
+        let mut conn = self.conn.as_ref().unwrap();
+        let mut reader = io::CountReader::new(&mut conn);
         while self.is_running() {
-            match self.receive_cmd() {
-                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => {
-                    let mut handler: RefMut<dyn EventHandler> = self.event_handler.borrow_mut();
-                    cmd::parse(data, &mut handler);
+            reader.mark();
+            if let Resp::Array(array) = reader.decode_resp()? {
+                let size = reader.reset()?;
+                info!("read aof: {}bytes", size);
+                let mut vec = Vec::with_capacity(array.len());
+                for x in array {
+                    if let Resp::BulkBytes(bytes) = x {
+                        vec.push(bytes);
+                    } else {
+                        panic!("Expected BulkString response");
+                    }
                 }
-                Err(ref err)
-                    if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut =>
+                self.config.repl_offset += size;
+                if let Err(error) = self
+                    .sender
+                    .as_ref()
+                    .unwrap()
+                    .send(Message::Some(self.config.repl_offset))
                 {
-                    // 不管，连接是好的
+                    error!("repl offset send error: {}", error);
                 }
-                Err(err) => return Err(err),
-                Ok(Data::Empty) => {}
+                info!("{:?}", vec);
+            } else {
+                panic!("Expected array response");
             }
         }
         Ok(())
@@ -311,6 +313,9 @@ pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
     Listener {
         config: conf,
         conn: Option::None,
+        rdb_parser: Rc::new(RefCell::new(DefaultRDBParser {
+            running: running.clone(),
+        })),
         event_handler: Rc::new(RefCell::new(NoOpEventHandler {})),
         module_parser: None,
         t_heartbeat: HeartbeatWorker { thread: None },
