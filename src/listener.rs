@@ -66,7 +66,6 @@ pub struct Listener {
     conn: Option<TcpStream>,
     rdb_parser: Rc<RefCell<dyn RDBParser>>,
     event_handler: Rc<RefCell<dyn EventHandler>>,
-    module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
     heartbeat_thread: HeartbeatWorker,
     sender: Option<mpsc::Sender<Message>>,
     running: Arc<AtomicBool>,
@@ -105,19 +104,6 @@ impl Listener {
         send(&mut conn, b"REPLCONF", &[b"listening-port", port])?;
         conn.decode_resp()?;
         Ok(())
-    }
-
-    /// 设置事件处理器
-    pub fn set_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
-        self.event_handler = handler
-    }
-
-    pub fn set_module_parser(&mut self, parser: Rc<RefCell<dyn ModuleParser>>) {
-        self.module_parser = Option::Some(parser)
-    }
-
-    pub fn set_rdb_parser(&mut self, parser: Rc<RefCell<dyn RDBParser>>) {
-        self.rdb_parser = parser
     }
 
     /// 开启replication
@@ -358,26 +344,6 @@ impl Drop for Listener {
     }
 }
 
-/// Listener实例的创建方法。 `running`变量用于在外部中断此crate内部的逻辑，设置为true再传入
-pub fn new(conf: Config, running: Arc<AtomicBool>) -> Listener {
-    if conf.is_aof && !running.load(Ordering::Relaxed) {
-        running.store(true, Ordering::Relaxed);
-    }
-
-    Listener {
-        config: conf,
-        conn: Option::None,
-        rdb_parser: Rc::new(RefCell::new(DefaultRDBParser {
-            running: running.clone(),
-        })),
-        event_handler: Rc::new(RefCell::new(NoOpEventHandler {})),
-        module_parser: None,
-        heartbeat_thread: HeartbeatWorker { thread: None },
-        sender: None,
-        running,
-    }
-}
-
 struct HeartbeatWorker {
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -398,4 +364,84 @@ enum Mode {
     PSync,
     Sync,
     Wait,
+}
+
+pub struct Builder {
+    pub config: Option<Config>,
+    pub rdb_parser: Option<Rc<RefCell<dyn RDBParser>>>,
+    pub event_handler: Option<Rc<RefCell<dyn EventHandler>>>,
+    pub module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
+    pub control_flag: Option<Arc<AtomicBool>>,
+}
+
+impl Builder {
+    pub fn new() -> Builder {
+        Builder {
+            config: None,
+            rdb_parser: None,
+            event_handler: None,
+            module_parser: None,
+            control_flag: None,
+        }
+    }
+
+    pub fn with_config(&mut self, config: Config) {
+        self.config = Some(config);
+    }
+
+    pub fn with_rdb_parser(&mut self, parser: Rc<RefCell<dyn RDBParser>>) {
+        self.rdb_parser = Some(parser);
+    }
+
+    pub fn with_event_handler(&mut self, handler: Rc<RefCell<dyn EventHandler>>) {
+        self.event_handler = Some(handler);
+    }
+
+    pub fn with_module_parser(&mut self, parser: Rc<RefCell<dyn ModuleParser>>) {
+        self.module_parser = Some(parser);
+    }
+
+    pub fn with_control_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.control_flag = Some(flag);
+    }
+
+    pub fn build(&mut self) -> Listener {
+        let config = match &mut self.config {
+            Some(c) => c,
+            None => panic!("Parameter Config is required"),
+        };
+
+        let module_parser = match &self.module_parser {
+            None => None,
+            Some(parser) => Some(parser.clone()),
+        };
+
+        let running = match &self.control_flag {
+            None => panic!("Parameter Control_flag is required"),
+            Some(flag) => flag.clone(),
+        };
+
+        let rdb_parser = match &self.rdb_parser {
+            None => Rc::new(RefCell::new(DefaultRDBParser {
+                running: Arc::clone(&running),
+                module_parser,
+            })),
+            Some(parser) => parser.clone(),
+        };
+
+        let event_handler = match &self.event_handler {
+            None => Rc::new(RefCell::new(NoOpEventHandler {})),
+            Some(handler) => handler.clone(),
+        };
+
+        Listener {
+            config: config.clone(),
+            conn: None,
+            rdb_parser,
+            event_handler,
+            heartbeat_thread: HeartbeatWorker { thread: None },
+            sender: None,
+            running,
+        }
+    }
 }

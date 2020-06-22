@@ -17,12 +17,17 @@ use crate::cmd::Command;
 use crate::iter::{
     IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter,
 };
-use crate::resp::RespDecode;
-use crate::{to_string, Event, EventHandler, RDBParser};
+use crate::resp::{RespDecode, MODULE_SET};
+use crate::{to_string, Event, EventHandler, ModuleParser, RDBParser};
+use std::cell::RefCell;
+use std::iter::FromIterator;
+use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
 
 pub(crate) struct DefaultRDBParser {
     pub(crate) running: Arc<AtomicBool>,
+    pub(crate) module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
 }
 
 impl RDBParser for DefaultRDBParser {
@@ -111,8 +116,8 @@ impl RDBParser for DefaultRDBParser {
                     self.read_object(input, value_type, event_handler, &meta)?;
                 }
                 RDB_OPCODE_MODULE_AUX => {
-                    // TODO
-                    unimplemented!()
+                    input.read_length()?;
+                    self.rdb_load_check_module_value(input)?;
                 }
                 RDB_OPCODE_EOF => {
                     if rdb_version >= 5 {
@@ -454,17 +459,283 @@ impl DefaultRDBParser {
                 }
             }
             RDB_TYPE_MODULE | RDB_TYPE_MODULE_2 => {
-                // TODO
-                unimplemented!()
+                let key = input.read_string()?;
+                let (module_id, _) = input.read_length()?;
+                let module_id = module_id as usize;
+                let mut array: [char; 9] = [' '; 9];
+                for i in 0..array.len() {
+                    let i1 = 10 + (array.len() - 1 - i) * 6;
+                    let i2 = (module_id >> i1 as usize) as usize;
+                    let i3 = i2 & 63;
+                    let chr = MODULE_SET.get(i3).unwrap();
+                    array[i] = *chr;
+                }
+                let module_name: String = String::from_iter(array.iter());
+                let module_version: usize = module_id & 1023;
+                if self.module_parser.is_none() && value_type == RDB_TYPE_MODULE {
+                    panic!(
+                        "MODULE {}, version {} 无法解析",
+                        module_name, module_version
+                    );
+                }
+                if let Some(parser) = &mut self.module_parser {
+                    let module: Box<dyn Module>;
+                    if value_type == RDB_TYPE_MODULE_2 {
+                        module = parser.borrow_mut().parse(input, &module_name, 2);
+                        let (len, _) = input.read_length()?;
+                        if len != 0 {
+                            panic!(
+                                "module '{}' that is not terminated by EOF marker, but {}",
+                                &module_name, len
+                            );
+                        }
+                    } else {
+                        module = parser
+                            .borrow_mut()
+                            .parse(input, &module_name, module_version);
+                    }
+                    event_handler.handle(Event::RDB(Object::Module(key, module, meta)));
+                } else {
+                    // 没有parser，并且是Module 2类型的值，那就可以直接跳过了
+                    self.rdb_load_check_module_value(input)?;
+                }
             }
             RDB_TYPE_STREAM_LISTPACKS => {
-                // TODO
-                unimplemented!()
+                let key = input.read_string()?;
+                let stream = self.read_stream_list_packs(meta, input)?;
+                event_handler.handle(Event::RDB(Object::Stream(key, stream)));
             }
             _ => panic!("unknown data type: {}", value_type),
         }
         Ok(())
     }
+
+    fn rdb_load_check_module_value(&mut self, input: &mut dyn Read) -> Result<()> {
+        loop {
+            let (op_code, _) = input.read_length()?;
+            if op_code == RDB_MODULE_OPCODE_EOF {
+                break;
+            }
+            if op_code == RDB_MODULE_OPCODE_SINT || op_code == RDB_MODULE_OPCODE_UINT {
+                input.read_length()?;
+            } else if op_code == RDB_MODULE_OPCODE_STRING {
+                input.read_string()?;
+            } else if op_code == RDB_MODULE_OPCODE_FLOAT {
+                input.read_exact(&mut [0; 4])?;
+            } else if op_code == RDB_MODULE_OPCODE_DOUBLE {
+                input.read_exact(&mut [0; 8])?;
+            }
+        }
+        Ok(())
+    }
+
+    fn read_stream_list_packs<'a>(
+        &mut self,
+        meta: &'a Meta,
+        input: &mut dyn Read,
+    ) -> Result<Stream<'a>> {
+        let mut entries: BTreeMap<ID, Entry> = BTreeMap::new();
+        let (length, _) = input.read_length()?;
+        for _ in 0..length {
+            let raw_id = input.read_string()?;
+            let mut cursor = Cursor::new(&raw_id);
+            let ms = read_long(&mut cursor, 8, false)?;
+            let seq = read_long(&mut cursor, 8, false)?;
+            let base_id = ID { ms, seq };
+            let raw_list_packs = input.read_string()?;
+            let mut list_pack = Cursor::new(&raw_list_packs);
+            list_pack.set_position(6);
+            let count = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+            let deleted = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+            let num_fields =
+                i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+            let mut tmp_fields = Vec::with_capacity(num_fields as usize);
+            for _ in 0..num_fields {
+                tmp_fields.push(read_list_pack_entry(&mut list_pack)?);
+            }
+            read_list_pack_entry(&mut list_pack)?;
+
+            let total = count + deleted;
+            for _ in 0..total {
+                let mut fields = BTreeMap::new();
+                let flag =
+                    i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+                let ms = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+                let seq = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+                let id = ID {
+                    ms: ms + base_id.ms,
+                    seq: seq + base_id.seq,
+                };
+                let deleted = (flag & 1) != 0;
+                if (flag & 2) != 0 {
+                    for i in 0..num_fields {
+                        let value = read_list_pack_entry(&mut list_pack)?;
+                        let field = tmp_fields.get(i as usize).unwrap().to_vec();
+                        fields.insert(field, value);
+                    }
+                    entries.insert(
+                        id,
+                        Entry {
+                            id,
+                            deleted,
+                            fields,
+                        },
+                    );
+                } else {
+                    let num_fields =
+                        i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+                    for _ in 0..num_fields {
+                        let field = read_list_pack_entry(&mut list_pack)?;
+                        let value = read_list_pack_entry(&mut list_pack)?;
+                        fields.insert(field, value);
+                    }
+                    entries.insert(
+                        id,
+                        Entry {
+                            id,
+                            deleted,
+                            fields,
+                        },
+                    );
+                }
+                read_list_pack_entry(&mut list_pack)?;
+            }
+            let end = list_pack.read_u8()?;
+            if end != 255 {
+                panic!("listpack expect 255 but {}", end);
+            }
+        }
+        input.read_length()?;
+        input.read_length()?;
+        input.read_length()?;
+
+        let mut groups: Vec<Group> = Vec::new();
+        let (count, _) = input.read_length()?;
+        for _ in 0..count {
+            let name = input.read_string()?;
+            let (ms, _) = input.read_length()?;
+            let (seq, _) = input.read_length()?;
+            let group_last_id = ID {
+                ms: ms as i64,
+                seq: seq as i64,
+            };
+            groups.push(Group {
+                name,
+                last_id: group_last_id,
+            });
+
+            let (global_pel, _) = input.read_length()?;
+            for _ in 0..global_pel {
+                read_long(input, 8, false)?;
+                read_long(input, 8, false)?;
+                input.read_integer(8, false)?;
+                input.read_length()?;
+            }
+
+            let (consumer_count, _) = input.read_length()?;
+            for _ in 0..consumer_count {
+                input.read_string()?;
+                input.read_integer(8, false)?;
+
+                let (pel, _) = input.read_length()?;
+                for _ in 0..pel {
+                    read_long(input, 8, false)?;
+                    read_long(input, 8, false)?;
+                }
+            }
+        }
+        Ok(Stream {
+            entries,
+            groups,
+            meta,
+        })
+    }
+}
+
+fn read_long(input: &mut dyn Read, length: i32, little_endian: bool) -> Result<i64> {
+    let mut r: i64 = 0;
+    for i in 0..length {
+        let v: i64 = input.read_u8()? as i64;
+        if little_endian {
+            r |= v << (i << 3) as i64;
+        } else {
+            r = (r << 8) | v;
+        }
+    }
+    Ok(r)
+}
+
+fn read_list_pack_entry(input: &mut dyn Read) -> Result<Vec<u8>> {
+    let special = input.read_u8()? as i32;
+    let skip: i32;
+    let mut bytes;
+    if (special & 0x80) == 0 {
+        skip = 1;
+        let value = special & 0x7F;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xC0) == 0x80 {
+        let len = special & 0x3F;
+        skip = 1 + len as i32;
+        bytes = vec![0; len as usize];
+        input.read_exact(&mut bytes)?;
+    } else if (special & 0xE0) == 0xC0 {
+        skip = 2;
+        let next = input.read_u8()?;
+        let value = (((special & 0x1F) << 8) | next as i32) << 19 >> 19;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF1 {
+        skip = 3;
+        let value = input.read_i16::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF2 {
+        skip = 4;
+        let value = input.read_i24::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF3 {
+        skip = 5;
+        let value = input.read_i32::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xFF) == 0xF4 {
+        skip = 9;
+        let value = input.read_i64::<LittleEndian>()?;
+        let value = value.to_string();
+        bytes = value.into_bytes();
+    } else if (special & 0xF0) == 0xE0 {
+        let next = input.read_u8()?;
+        let len = ((special & 0x0F) << 8) | next as i32;
+        skip = 2 + len as i32;
+        bytes = vec![0; len as usize];
+        input.read_exact(&mut bytes)?;
+    } else if (special & 0xFF) == 0xF0 {
+        let len = input.read_u32::<BigEndian>()?;
+        skip = 5 + len as i32;
+        bytes = vec![0; len as usize];
+        input.read_exact(&mut bytes)?;
+    } else {
+        panic!("{}", special)
+    }
+    if skip <= 127 {
+        let mut buf = vec![0; 1];
+        input.read_exact(&mut buf)?;
+    } else if skip < 16383 {
+        let mut buf = vec![0; 2];
+        input.read_exact(&mut buf)?;
+    } else if skip < 2097151 {
+        let mut buf = vec![0; 3];
+        input.read_exact(&mut buf)?;
+    } else if skip < 268435455 {
+        let mut buf = vec![0; 4];
+        input.read_exact(&mut buf)?;
+    } else {
+        let mut buf = vec![0; 5];
+        input.read_exact(&mut buf)?;
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn read_zm_len(cursor: &mut Cursor<&Vec<u8>>) -> Result<usize> {
