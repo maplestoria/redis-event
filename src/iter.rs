@@ -3,8 +3,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::io::Conn;
-use crate::rdb::{read_zip_list_entry, read_zm_len, Field, Item};
+use crate::rdb::{read_zip_list_entry, read_zm_len, Field, Item, RDBDecode};
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///
@@ -17,7 +16,7 @@ pub(crate) trait Iter {
 // 字符串类型的值迭代器
 pub(crate) struct StrValIter<'a> {
     pub(crate) count: isize,
-    pub(crate) input: &'a mut Conn,
+    pub(crate) input: &'a mut dyn Read,
 }
 
 impl Iter for StrValIter<'_> {
@@ -35,7 +34,7 @@ impl Iter for StrValIter<'_> {
 pub(crate) struct QuickListIter<'a> {
     pub(crate) len: isize,
     pub(crate) count: isize,
-    pub(crate) input: &'a mut Conn,
+    pub(crate) input: &'a mut dyn Read,
     pub(crate) cursor: Option<Cursor<Vec<u8>>>,
 }
 
@@ -99,7 +98,7 @@ pub(crate) struct SortedSetIter<'a> {
     /// v = 1, zset
     /// v = 2, zset2
     pub(crate) v: u8,
-    pub(crate) input: &'a mut Conn,
+    pub(crate) input: &'a mut dyn Read,
 }
 
 impl SortedSetIter<'_> {

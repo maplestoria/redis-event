@@ -26,3 +26,18 @@ pub struct Config {
     /// Write Timeout
     pub write_timeout: Option<Duration>,
 }
+
+impl Clone for Config {
+    fn clone(&self) -> Self {
+        Config {
+            is_discard_rdb: self.is_discard_rdb,
+            is_aof: self.is_aof,
+            addr: self.addr,
+            password: self.password.clone(),
+            repl_id: self.repl_id.clone(),
+            repl_offset: self.repl_offset,
+            read_timeout: self.read_timeout,
+            write_timeout: self.write_timeout,
+        }
+    }
+}

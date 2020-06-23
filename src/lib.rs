@@ -1,51 +1,59 @@
 /*!
-用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用。
-
-# 原理
-
-此crate实现了[Redis Replication协议]，在运行时，程序将以replica的身份连接到Redis，相当于Redis的一个副本。
-
-所以，在程序连接上某个Redis之后，Redis会将它当前的所有数据以RDB的格式dump一份，dump完毕之后便发送过来，这个RDB中的每一条数据就对应一个[`Event`]`::RDB`事件。
-
-在这之后，Redis接收到来自客户端的写入操作(即Redis命令)后，也会将这个写入操作传播给它的replica，每一个写入操作就对应一个[`Event`]`::AOF`事件。
-
-# 示例
-
-```rust,no_run
-use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::str::FromStr;
-use std::rc::Rc;
-use std::cell::RefCell;
-use redis_event::listener;
-use redis_event::config::Config;
-use redis_event::{NoOpEventHandler, RedisListener};
-
-
-let ip = IpAddr::from_str("127.0.0.1").unwrap();
-let port = 6379;
-
-let conf = Config {
-    is_discard_rdb: false,            // 不跳过RDB
-    is_aof: false,                    // 不处理AOF
-    addr: SocketAddr::new(ip, port),
-    password: String::new(),          // 密码为空
-    repl_id: String::from("?"),       // replication id，若无此id，设置为?即可
-    repl_offset: -1,                  // replication offset，若无此offset，设置为-1即可
-    read_timeout: None,               // None，即读取永不超时
-    write_timeout: None,              // None，即写入永不超时
-};
-let running = Arc::new(AtomicBool::new(true));
-let mut redis_listener = listener::new(conf, running);
-// 设置事件处理器
-redis_listener.set_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
-// 启动程序
-redis_listener.start()?;
-```
-
-[Redis Replication协议]: https://redis.io/topics/replication
-[`Event`]: enum.Event.html
+* 用于监听Redis的写入操作，据此可以实现数据复制，监控等相关的应用。
+*
+* # 原理
+*
+* 此crate实现了[Redis Replication协议]，在运行时，程序将以replica的身份连接到Redis，相当于Redis的一个副本。
+*
+* 所以，在程序连接上某个Redis之后，Redis会将它当前的所有数据以RDB的格式dump一份，dump完毕之后便发送过来，这个RDB中的每一条数据就对应一个[`Event`]`::RDB`事件。
+*
+* 在这之后，Redis接收到来自客户端的写入操作(即Redis命令)后，也会将这个写入操作传播给它的replica，每一个写入操作就对应一个[`Event`]`::AOF`事件。
+*
+* # 示例
+*
+* ```no_run
+* use std::net::{IpAddr, SocketAddr};
+* use std::sync::atomic::AtomicBool;
+* use std::sync::Arc;
+* use std::str::FromStr;
+* use std::rc::Rc;
+* use std::cell::RefCell;
+* use redis_event::listener;
+* use redis_event::config::Config;
+* use redis_event::{NoOpEventHandler, RedisListener};
+*
+* fn main() -> std::io::Result<()> {
+*     let ip = IpAddr::from_str("127.0.0.1").unwrap();
+*     let port = 6379;
+*
+*     let conf = Config {
+*         is_discard_rdb: false,            // 不跳过RDB
+*         is_aof: false,                    // 不处理AOF
+*         addr: SocketAddr::new(ip, port),
+*         password: String::new(),          // 密码为空
+*         repl_id: String::from("?"),       // replication id，若无此id，设置为?即可
+*         repl_offset: -1,                  // replication offset，若无此offset，设置为-1即可
+*         read_timeout: None,               // None，即读取永不超时
+*         write_timeout: None,              // None，即写入永不超时
+*     };
+*     let running = Arc::new(AtomicBool::new(true));
+*
+*     let mut builder = listener::Builder::new();
+*     builder.with_config(conf);
+*     // 设置控制变量, 通过此变量在外界中断`redis_event`内部的逻辑
+*     builder.with_control_flag(running);
+*     // 设置事件处理器
+*     builder.with_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
+*
+*     let mut redis_listener = builder.build();
+*     // 启动程序
+*     redis_listener.start()?;
+*     Ok(())
+* }
+* ```
+*
+* [Redis Replication协议]: https://redis.io/topics/replication
+* [`Event`]: enum.Event.html
 */
 
 use std::io::{Read, Result};
@@ -60,12 +68,30 @@ mod iter;
 pub mod listener;
 mod lzf;
 pub mod rdb;
+pub mod resp;
 mod tests;
 
 /// Redis事件监听器的定义，所有类型的监听器都实现此接口
 pub trait RedisListener {
     /// 开启事件监听
     fn start(&mut self) -> Result<()>;
+}
+
+/// Redis RDB 解析器定义
+pub trait RDBParser {
+    /// 解析RDB的具体实现
+    ///
+    /// 方法参数:
+    ///
+    /// * `input`: RDB输入流
+    /// * `length`: RDB的总长度
+    /// * `event_handler`: Redis事件处理器
+    fn parse(
+        &mut self,
+        input: &mut dyn Read,
+        length: i64,
+        event_handler: &mut dyn EventHandler,
+    ) -> Result<()>;
 }
 
 /// Redis事件
@@ -87,7 +113,7 @@ pub trait EventHandler {
     fn handle(&mut self, event: Event);
 }
 
-/// No Operation处理器，对于接收到的事件，不做任何处理
+/// 对于接收到的Redis事件不做任何处理
 pub struct NoOpEventHandler {}
 
 impl EventHandler for NoOpEventHandler {
@@ -96,6 +122,13 @@ impl EventHandler for NoOpEventHandler {
 
 /// Module Parser
 pub trait ModuleParser {
+    /// 解析Module的具体实现
+    ///
+    /// 方法参数:
+    ///
+    /// * `input`: RDB输入流
+    /// * `module_name`: Module的名字
+    /// * `module_version`: Module的版本
     fn parse(
         &mut self,
         input: &mut dyn Read,

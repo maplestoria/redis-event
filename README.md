@@ -9,7 +9,7 @@
 
 ```
 [dependencies]
-redis-event = "1.0.3"
+redis-event = "1.1.0"
 ```
 
 ## 原理
@@ -49,79 +49,17 @@ fn main() -> io::Result<()> {
         write_timeout: None,              // None，即写入永不超时
     };
     let running = Arc::new(AtomicBool::new(true));
-    let mut redis_listener = listener::new(conf, running);
+
+    let mut builder = listener::Builder::new();
+    builder.with_config(conf);
+    // 设置控制变量, 通过此变量在外界中断`redis_event`内部的逻辑
+    builder.with_control_flag(running);
     // 设置事件处理器
-    redis_listener.set_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
+    builder.with_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
+
+    let mut redis_listener = builder.build();
     // 启动程序
-    redis_listener.start()?
-}
-```
-
-### Module
-
-#### Module解析示例
-
-```rust
-use std::any::Any;
-use redis_event::rdb::Module;
-use redis_event::ModuleParser;
-
-#[derive(Debug)]
-struct HelloModule {
-    pub values: Vec<i64>
-}
-
-impl Module for HelloModule {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-struct HelloModuleParser {}
-
-impl ModuleParser for HelloModuleParser {
-    fn parse(&mut self, input: &mut dyn Read, _module_name: &str, module_version: usize) -> Box<dyn Module> {
-        let elements = self.load_unsigned(input, module_version);
-        let elements = elements.to_u32().unwrap();
-        
-        let mut array = Vec::new();
-        for _ in 0..elements {
-            let val = self.load_signed(input, module_version);
-            array.push(val);
-        }
-        
-        Box::new(HelloModule { values: array })
-    }
-}
-
-fn main() {
-    // 省略其他代码...
-    let parser = Rc::new(RefCell::new(HelloModuleParser {}));
-    let mut redis_listener = redis_event::listener::new(conf, running);
-    redis_listener.set_module_parser(parser);
-}
-```
-
-#### 处理Module
-
-```rust
-impl EventHandler for EventHandlerImpl {
-    fn handle(&mut self, event: Event) {
-        match event {
-            Event::RDB(rdb) => {
-                match rdb {
-                    Object::Module(_, module) => {
-                        let hello_module: &HelloModule = match module.as_any().downcast_ref::<HelloModule>() {
-                            Some(hello_module) => hello_module,
-                            None => panic!("not HelloModule")
-                        };
-                        // ...
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
+    redis_listener.start()?;
+    Ok(())
 }
 ```

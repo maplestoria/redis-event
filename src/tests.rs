@@ -1,27 +1,24 @@
 #[cfg(test)]
 mod rdb_tests {
     use std::any::Any;
-    use std::cell::{RefCell, RefMut};
+    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs::File;
-    use std::io::{Cursor, Read};
+    use std::io::Read;
     use std::rc::Rc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
-    use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
     use num_bigint::Sign;
     use num_traits::ToPrimitive;
 
-    use crate::rdb::{
-        EvictType, ExpireType, Module, Object, ID, RDB_14BITLEN, RDB_32BITLEN, RDB_64BITLEN,
-        RDB_6BITLEN, RDB_ENCVAL,
-    };
-    use crate::{io, rdb, Event, EventHandler, ModuleParser};
+    use crate::rdb::{DefaultRDBParser, EvictType, ExpireType, Module, Object, RDBDecode, ID};
+    use crate::{Event, EventHandler, ModuleParser, RDBParser};
 
     #[test]
     fn test_zipmap_not_compress() {
-        let file =
+        let mut file =
             File::open("tests/rdb/zipmap_that_doesnt_compress_1.rdb").expect("file not found");
-        let mut file = io::from_file(file);
 
         struct TestRdbHandler {
             map: HashMap<String, String>,
@@ -49,19 +46,21 @@ mod rdb_tests {
                 }
             }
         }
-        let handler = Rc::new(RefCell::new(TestRdbHandler {
+        let mut handler = TestRdbHandler {
             map: HashMap::new(),
-        }));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        };
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_zipmap_compress() {
-        let file =
+        let mut file =
             File::open("tests/rdb/zipmap_that_compresses_easily_1.rdb").expect("file not found");
-        let mut file = io::from_file(file);
 
         struct TestRdbHandler {
             map: HashMap<String, String>,
@@ -97,18 +96,20 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {
+        let mut handler = TestRdbHandler {
             map: HashMap::new(),
-        }));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        };
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_regular_sorted_set() {
-        let file = File::open("tests/rdb/regular_sorted_set_1.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/regular_sorted_set_1.rdb").expect("file not found");
 
         struct TestRdbHandler {
             map: HashMap<String, f64>,
@@ -152,19 +153,21 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {
+        let mut handler = TestRdbHandler {
             map: HashMap::new(),
-        }));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        };
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_ziplist_that_compresses_easily() {
-        let file =
+        let mut file =
             File::open("tests/rdb/ziplist_that_compresses_easily_1.rdb").expect("file not found");
-        let mut file = io::from_file(file);
 
         struct TestRdbHandler {
             list: Vec<String>,
@@ -203,16 +206,18 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler { list: Vec::new() }));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler { list: Vec::new() };
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_zset_ziplist() {
-        let file = File::open("tests/rdb/parser_filters.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/parser_filters.rdb").expect("file not found");
 
         struct TestRdbHandler {
             map: HashMap<String, f64>,
@@ -261,18 +266,20 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {
+        let mut handler = TestRdbHandler {
             map: HashMap::new(),
-        }));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        };
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_ziplist_with_integers() {
-        let file = File::open("tests/rdb/ziplist_with_integers.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/ziplist_with_integers.rdb").expect("file not found");
 
         struct TestRdbHandler {}
 
@@ -323,16 +330,18 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_dump_lru() {
-        let file = File::open("tests/rdb/dump-lru.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/dump-lru.rdb").expect("file not found");
 
         struct TestRdbHandler {}
 
@@ -373,16 +382,18 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_dump_lfu() {
-        let file = File::open("tests/rdb/dump-lfu.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/dump-lfu.rdb").expect("file not found");
 
         struct TestRdbHandler {}
 
@@ -422,63 +433,13 @@ mod rdb_tests {
                 }
             }
         }
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
-    }
-
-    fn read_length(input: &mut dyn Read) -> std::io::Result<(isize, bool)> {
-        let byte = input.read_u8()?;
-        let _type = (byte & 0xC0) >> 6;
-
-        let mut result = -1;
-        let mut is_encoded = false;
-
-        if _type == RDB_ENCVAL {
-            result = (byte & 0x3F) as isize;
-            is_encoded = true;
-        } else if _type == RDB_6BITLEN {
-            result = (byte & 0x3F) as isize;
-        } else if _type == RDB_14BITLEN {
-            let next_byte = input.read_u8()?;
-            result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
-        } else if byte == RDB_32BITLEN {
-            result = read_integer(input, 4, true)?;
-        } else if byte == RDB_64BITLEN {
-            result = read_integer(input, 8, true)?;
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
         };
-        Ok((result, is_encoded))
-    }
-
-    // 从流中读取一个Integer
-    fn read_integer(
-        input: &mut dyn Read,
-        size: isize,
-        is_big_endian: bool,
-    ) -> std::io::Result<isize> {
-        let mut buff = vec![0; size as usize];
-        input.read_exact(&mut buff)?;
-        let mut cursor = Cursor::new(&buff);
-
-        if is_big_endian {
-            if size == 2 {
-                return Ok(cursor.read_i16::<BigEndian>()? as isize);
-            } else if size == 4 {
-                return Ok(cursor.read_i32::<BigEndian>()? as isize);
-            } else if size == 8 {
-                return Ok(cursor.read_i64::<BigEndian>()? as isize);
-            };
-        } else {
-            if size == 2 {
-                return Ok(cursor.read_i16::<LittleEndian>()? as isize);
-            } else if size == 4 {
-                return Ok(cursor.read_i32::<LittleEndian>()? as isize);
-            } else if size == 8 {
-                return Ok(cursor.read_i64::<LittleEndian>()? as isize);
-            };
-        }
-        panic!("Invalid integer size: {}", size)
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     struct HelloModuleParser {}
@@ -506,12 +467,12 @@ mod rdb_tests {
 
         fn load_signed(&self, input: &mut dyn Read, version: usize) -> i64 {
             if version == 2 {
-                let (opcode, _) = read_length(input).unwrap();
+                let (opcode, _) = input.read_length().unwrap();
                 if opcode != 2 {
                     panic!("opcode != 2");
                 }
             }
-            let (len, _) = read_length(input).unwrap();
+            let (len, _) = input.read_length().unwrap();
             len as i64
         }
     }
@@ -538,11 +499,9 @@ mod rdb_tests {
 
     #[test]
     fn test_module() {
-        let file = File::open("tests/rdb/module.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/module.rdb").expect("file not found");
 
         let parser = Rc::new(RefCell::new(HelloModuleParser {}));
-        file.module_parser = Option::Some(parser);
 
         struct TestRdbHandler {}
 
@@ -568,19 +527,20 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: Some(parser),
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_module2() {
-        let file = File::open("tests/rdb/dump-module-2.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/dump-module-2.rdb").expect("file not found");
 
         let parser = Rc::new(RefCell::new(HelloModuleParser {}));
-        file.module_parser = Option::Some(parser);
 
         struct TestRdbHandler {}
 
@@ -608,32 +568,37 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: Some(parser),
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_module2_skip() {
-        let file = File::open("tests/rdb/dump-json-module.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/dump-json-module.rdb").expect("file not found");
+
         struct TestRdbHandler {}
 
         impl EventHandler for TestRdbHandler {
             fn handle(&mut self, _: Event) {}
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_stream() {
-        let file = File::open("tests/rdb/dump-stream.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/dump-stream.rdb").expect("file not found");
 
         struct TestRdbHandler {}
 
@@ -762,16 +727,18 @@ mod rdb_tests {
             }
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 
     #[test]
     fn test_stream1() {
-        let file = File::open("tests/rdb/dump-stream1.rdb").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/rdb/dump-stream1.rdb").expect("file not found");
 
         struct TestRdbHandler {}
 
@@ -779,27 +746,28 @@ mod rdb_tests {
             fn handle(&mut self, _: Event) {}
         }
 
-        let handler = Rc::new(RefCell::new(TestRdbHandler {}));
-        let mut handler: RefMut<dyn EventHandler> = handler.borrow_mut();
+        let mut handler = TestRdbHandler {};
 
-        rdb::parse(&mut file, 0, &mut handler).unwrap();
+        let mut rdb_parser = DefaultRDBParser {
+            running: Arc::new(AtomicBool::new(true)),
+            module_parser: None,
+        };
+        rdb_parser.parse(&mut file, 0, &mut handler).unwrap();
     }
 }
 
 #[cfg(test)]
 mod aof_tests {
-    use std::cell::{RefCell, RefMut};
     use std::fs::File;
-    use std::rc::Rc;
 
     use crate::cmd::Command;
-    use crate::rdb::Data;
-    use crate::{cmd, io, Event, EventHandler};
+    use crate::resp::{Resp, RespDecode};
+    use crate::{cmd, Event, EventHandler};
+    use std::io::ErrorKind;
 
     #[test]
     fn test_aof1() {
-        let file = File::open("tests/aof/appendonly1.aof").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/aof/appendonly1.aof").expect("file not found");
 
         struct TestCmdHandler {}
 
@@ -842,30 +810,38 @@ mod aof_tests {
             }
         }
 
-        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler {}));
-        let mut cmd_handler: RefMut<dyn EventHandler> = cmd_handler.borrow_mut();
+        let mut cmd_handler = TestCmdHandler {};
 
         loop {
-            match file.reply(io::read_bytes, &mut cmd_handler) {
-                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
-                Err(err) => {
-                    // eof reached
-                    if "failed to fill whole buffer".eq(&err.to_string()) {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
                         break;
                     } else {
-                        panic!(err);
+                        panic!("err")
                     }
                 }
-                Ok(Data::Empty) => break,
             }
         }
     }
 
     #[test]
     fn test_aof2() {
-        let file = File::open("tests/aof/appendonly2.aof").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/aof/appendonly2.aof").expect("file not found");
 
         struct TestCmdHandler {
             count: isize,
@@ -887,33 +863,40 @@ mod aof_tests {
             }
         }
 
-        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler { count: 0 }));
+        let mut cmd_handler = TestCmdHandler { count: 0 };
 
         loop {
-            let mut cmd_handler: RefMut<dyn EventHandler> = cmd_handler.borrow_mut();
-
-            match file.reply(io::read_bytes, &mut cmd_handler) {
-                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
-                Err(err) => {
-                    // eof reached
-                    if "failed to fill whole buffer".eq(&err.to_string()) {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
                         break;
                     } else {
-                        panic!(err);
+                        panic!("err")
                     }
                 }
-                Ok(Data::Empty) => break,
             }
         }
 
-        assert_eq!(48000, cmd_handler.borrow().count);
+        assert_eq!(48000, cmd_handler.count);
     }
 
     #[test]
     fn test_aof3() {
-        let file = File::open("tests/aof/appendonly3.aof").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/aof/appendonly3.aof").expect("file not found");
 
         struct TestCmdHandler {
             count: isize,
@@ -925,30 +908,38 @@ mod aof_tests {
             }
         }
 
-        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler { count: 0 }));
+        let mut cmd_handler = TestCmdHandler { count: 0 };
         loop {
-            let mut cmd_handler: RefMut<dyn EventHandler> = cmd_handler.borrow_mut();
-            match file.reply(io::read_bytes, &mut cmd_handler) {
-                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
-                Err(err) => {
-                    // eof reached
-                    if "failed to fill whole buffer".eq(&err.to_string()) {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
                         break;
                     } else {
-                        panic!(err);
+                        panic!("err")
                     }
                 }
-                Ok(Data::Empty) => break,
             }
         }
-        assert_eq!(92539, cmd_handler.borrow().count);
+        assert_eq!(92539, cmd_handler.count);
     }
 
     #[test]
     fn test_aof5() {
-        let file = File::open("tests/aof/appendonly5.aof").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/aof/appendonly5.aof").expect("file not found");
 
         struct TestCmdHandler {
             count: isize,
@@ -960,32 +951,40 @@ mod aof_tests {
             }
         }
 
-        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler { count: 0 }));
+        let mut cmd_handler = TestCmdHandler { count: 0 };
 
         loop {
-            let mut cmd_handler: RefMut<dyn EventHandler> = cmd_handler.borrow_mut();
-            match file.reply(io::read_bytes, &mut cmd_handler) {
-                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
-                Err(err) => {
-                    // eof reached
-                    if "failed to fill whole buffer".eq(&err.to_string()) {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
                         break;
                     } else {
-                        panic!(err);
+                        panic!("err")
                     }
                 }
-                Ok(Data::Empty) => break,
             }
         }
 
-        assert_eq!(71, cmd_handler.borrow().count);
+        assert_eq!(71, cmd_handler.count);
     }
 
     #[test]
     fn test_aof6() {
-        let file = File::open("tests/aof/appendonly.aof").expect("file not found");
-        let mut file = io::from_file(file);
+        let mut file = File::open("tests/aof/appendonly.aof").expect("file not found");
 
         struct TestCmdHandler {}
 
@@ -1032,22 +1031,30 @@ mod aof_tests {
             }
         }
 
-        let cmd_handler = Rc::new(RefCell::new(TestCmdHandler {}));
-        let mut cmd_handler: RefMut<dyn EventHandler> = cmd_handler.borrow_mut();
-
+        let mut cmd_handler = TestCmdHandler {};
         loop {
-            match file.reply(io::read_bytes, &mut cmd_handler) {
-                Ok(Data::Bytes(_)) => panic!("Expect BytesVec response, but got Bytes"),
-                Ok(Data::BytesVec(data)) => cmd::parse(data, &mut cmd_handler),
-                Err(err) => {
-                    // eof reached
-                    if "failed to fill whole buffer".eq(&err.to_string()) {
+            match file.decode_resp() {
+                Ok(resp) => match resp {
+                    Resp::Array(arr) => {
+                        let mut data = Vec::new();
+                        for x in arr {
+                            if let Resp::BulkBytes(bytes) = x {
+                                data.push(bytes);
+                            } else {
+                                panic!("wrong data type");
+                            }
+                        }
+                        cmd::parse(data, &mut cmd_handler);
+                    }
+                    _ => panic!("wrong resp type "),
+                },
+                Err(ref e) => {
+                    if e.kind() == ErrorKind::UnexpectedEof {
                         break;
                     } else {
-                        panic!(err);
+                        panic!("err")
                     }
                 }
-                Ok(Data::Empty) => break,
             }
         }
     }
