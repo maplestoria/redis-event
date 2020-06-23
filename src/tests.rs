@@ -12,11 +12,7 @@ mod rdb_tests {
     use num_bigint::Sign;
     use num_traits::ToPrimitive;
 
-    use crate::rdb::{
-        DefaultRDBParser, EvictType, ExpireType, Module, Object, ID, RDB_14BITLEN, RDB_32BITLEN,
-        RDB_64BITLEN, RDB_6BITLEN, RDB_ENCVAL,
-    };
-    use crate::resp::RespDecode;
+    use crate::rdb::{DefaultRDBParser, EvictType, ExpireType, Module, Object, RDBDecode, ID};
     use crate::{Event, EventHandler, ModuleParser, RDBParser};
 
     #[test]

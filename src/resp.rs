@@ -1,22 +1,26 @@
-use std::io::{Cursor, Error, ErrorKind, Read, Result};
+/*!
+Redis Serialization Protocol相关的解析代码
+*/
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use std::io::{Error, ErrorKind, Read, Result};
 
-use crate::rdb::*;
-use crate::{lzf, to_string};
-use std::f64::{INFINITY, NAN, NEG_INFINITY};
+use byteorder::ReadBytesExt;
 
+use crate::to_string;
+
+/// Redis Serialization Protocol解析
 pub trait RespDecode: Read {
+    /// 读取并解析Redis响应
     fn decode_resp(&mut self) -> Result<Resp> {
         match self.decode_type()? {
             Type::String => Ok(Resp::String(self.decode_string()?)),
             Type::Int => self.decode_int(),
             Type::Error => Err(Error::new(ErrorKind::InvalidData, self.decode_string()?)),
-            Type::BulkBytes => self.decode_bulk_bytes(),
+            Type::BulkString => self.decode_bulk_string(),
             Type::Array => self.decode_array(),
         }
     }
-
+    /// 读取解析Redis响应的类型
     fn decode_type(&mut self) -> Result<Type> {
         loop {
             let b = self.read_u8()?;
@@ -27,14 +31,14 @@ pub trait RespDecode: Read {
                     PLUS => return Ok(Type::String),
                     MINUS => return Ok(Type::Error),
                     COLON => return Ok(Type::Int),
-                    DOLLAR => return Ok(Type::BulkBytes),
+                    DOLLAR => return Ok(Type::BulkString),
                     STAR => return Ok(Type::Array),
                     _ => panic!("Unexpected Data Type: {}", b),
                 }
             }
         }
     }
-
+    /// 解析Simple String响应
     fn decode_string(&mut self) -> Result<String> {
         let mut buf = vec![];
         loop {
@@ -52,13 +56,15 @@ pub trait RespDecode: Read {
         }
     }
 
+    /// 解析Integer响应
     fn decode_int(&mut self) -> Result<Resp> {
         let s = self.decode_string()?;
         let i = s.parse::<i64>().unwrap();
         return Ok(Resp::Int(i));
     }
 
-    fn decode_bulk_bytes(&mut self) -> Result<Resp> {
+    /// 解析Bulk String响应
+    fn decode_bulk_string(&mut self) -> Result<Resp> {
         let r = self.decode_int()?;
         if let Resp::Int(i) = r {
             if i > 0 {
@@ -80,6 +86,7 @@ pub trait RespDecode: Read {
         }
     }
 
+    /// 解析Array响应
     fn decode_array(&mut self) -> Result<Resp> {
         let r = self.decode_int()?;
         if let Resp::Int(i) = r {
@@ -93,107 +100,6 @@ pub trait RespDecode: Read {
             panic!("Expected Int Response");
         }
     }
-
-    // 读取redis响应中下一条数据的长度
-    fn read_length(&mut self) -> Result<(isize, bool)> {
-        let byte = self.read_u8()?;
-        let _type = (byte & 0xC0) >> 6;
-
-        let mut result = -1;
-        let mut is_encoded = false;
-
-        if _type == RDB_ENCVAL {
-            result = (byte & 0x3F) as isize;
-            is_encoded = true;
-        } else if _type == RDB_6BITLEN {
-            result = (byte & 0x3F) as isize;
-        } else if _type == RDB_14BITLEN {
-            let next_byte = self.read_u8()?;
-            result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
-        } else if byte == RDB_32BITLEN {
-            result = self.read_integer(4, true)?;
-        } else if byte == RDB_64BITLEN {
-            result = self.read_integer(8, true)?;
-        };
-        Ok((result, is_encoded))
-    }
-
-    // 从流中读取一个Integer
-    fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
-        let mut buff = vec![0; size as usize];
-        self.read_exact(&mut buff)?;
-        let mut cursor = Cursor::new(&buff);
-
-        if is_big_endian {
-            if size == 2 {
-                return Ok(cursor.read_i16::<BigEndian>()? as isize);
-            } else if size == 4 {
-                return Ok(cursor.read_i32::<BigEndian>()? as isize);
-            } else if size == 8 {
-                return Ok(cursor.read_i64::<BigEndian>()? as isize);
-            };
-        } else {
-            if size == 2 {
-                return Ok(cursor.read_i16::<LittleEndian>()? as isize);
-            } else if size == 4 {
-                return Ok(cursor.read_i32::<LittleEndian>()? as isize);
-            } else if size == 8 {
-                return Ok(cursor.read_i64::<LittleEndian>()? as isize);
-            };
-        }
-        panic!("Invalid integer size: {}", size)
-    }
-
-    // 从流中读取一个string
-    fn read_string(&mut self) -> Result<Vec<u8>> {
-        let (length, is_encoded) = self.read_length()?;
-        if is_encoded {
-            match length {
-                RDB_ENC_INT8 => {
-                    let int = self.read_i8()?;
-                    return Ok(int.to_string().into_bytes());
-                }
-                RDB_ENC_INT16 => {
-                    let int = self.read_integer(2, false)?;
-                    return Ok(int.to_string().into_bytes());
-                }
-                RDB_ENC_INT32 => {
-                    let int = self.read_integer(4, false)?;
-                    return Ok(int.to_string().into_bytes());
-                }
-                RDB_ENC_LZF => {
-                    let (compressed_len, _) = self.read_length()?;
-                    let (origin_len, _) = self.read_length()?;
-                    let mut compressed = vec![0; compressed_len as usize];
-                    self.read_exact(&mut compressed)?;
-                    let mut origin = vec![0; origin_len as usize];
-                    lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
-                    return Ok(origin);
-                }
-                _ => panic!("Invalid string length: {}", length),
-            };
-        };
-        let mut buff = vec![0; length as usize];
-        self.read_exact(&mut buff)?;
-        Ok(buff)
-    }
-
-    // 从流中读取一个double
-    fn read_double(&mut self) -> Result<f64> {
-        let len = self.read_u8()?;
-        return match len {
-            255 => Ok(NEG_INFINITY),
-            254 => Ok(INFINITY),
-            253 => Ok(NAN),
-            _ => {
-                let mut buff = vec![0; len as usize];
-                self.read_exact(&mut buff)?;
-                let score_str = to_string(buff);
-                let score = score_str.parse::<f64>().unwrap();
-                Ok(score)
-            }
-        };
-    }
 }
 
 impl<R: Read + ?Sized> RespDecode for R {}
@@ -202,7 +108,7 @@ pub enum Type {
     String,
     Error,
     Int,
-    BulkBytes,
+    BulkString,
     Array,
 }
 
@@ -227,13 +133,6 @@ pub(crate) const PLUS: u8 = b'+';
 pub(crate) const MINUS: u8 = b'-';
 // 代表integer响应
 pub(crate) const COLON: u8 = b':';
-
-pub const MODULE_SET: [char; 64] = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
-    'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4',
-    '5', '6', '7', '8', '9', '-', '_',
-];
 
 #[cfg(test)]
 mod test {

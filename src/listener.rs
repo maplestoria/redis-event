@@ -3,43 +3,6 @@
 
 [`RedisListener`]: trait.RedisListener.html
 */
-
-/// 此模块针对单节点Redis，实现了`RedisListener`接口
-///
-/// # 示例
-///
-/// ```no_run
-/// use std::net::{IpAddr, SocketAddr};
-/// use std::sync::atomic::AtomicBool;
-/// use std::sync::Arc;
-/// use std::str::FromStr;
-/// use std::rc::Rc;
-/// use std::cell::RefCell;
-/// use redis_event::listener;
-/// use redis_event::config::Config;
-/// use redis_event::{NoOpEventHandler, RedisListener};
-///
-///
-/// let ip = IpAddr::from_str("127.0.0.1").unwrap();
-/// let port = 6379;
-///
-/// let conf = Config {
-///     is_discard_rdb: false,            // 不跳过RDB
-///     is_aof: false,                    // 不处理AOF
-///     addr: SocketAddr::new(ip, port),
-///     password: String::new(),          // 密码为空
-///     repl_id: String::from("?"),       // replication id，若无此id，设置为?即可
-///     repl_offset: -1,                  // replication offset，若无此offset，设置为-1即可
-///     read_timeout: None,               // None，即读取永不超时
-///     write_timeout: None,              // None，即写入永不超时
-/// };
-/// let running = Arc::new(AtomicBool::new(true));
-/// let mut redis_listener = listener::new(conf, running);
-/// // 设置事件处理器
-/// redis_listener.set_event_handler(Rc::new(RefCell::new(NoOpEventHandler{})));
-/// // 启动程序
-/// redis_listener.start()?;
-/// ```
 use std::cell::RefCell;
 use std::io::Result;
 use std::net::TcpStream;
@@ -165,7 +128,7 @@ impl Listener {
                             panic!("Expect replication offset, but got None");
                         }
                         info!("等待Redis dump完成...");
-                        if let Type::BulkBytes = conn.decode_type()? {
+                        if let Type::BulkString = conn.decode_type()? {
                             if let Resp::Int(length) = conn.decode_int()? {
                                 return Ok((NextStep::FullSync, length));
                             } else {
@@ -203,7 +166,7 @@ impl Listener {
     fn sync(&mut self) -> Result<i64> {
         let mut conn = self.conn.as_mut().unwrap();
         send(&mut conn, b"SYNC", &vec![])?;
-        if let Type::BulkBytes = conn.decode_type()? {
+        if let Type::BulkString = conn.decode_type()? {
             if let Resp::Int(length) = conn.decode_int()? {
                 return Ok(length);
             } else {
@@ -406,7 +369,7 @@ impl Builder {
     }
 
     pub fn build(&mut self) -> Listener {
-        let config = match &mut self.config {
+        let config = match &self.config {
             Some(c) => c,
             None => panic!("Parameter Config is required"),
         };

@@ -3,8 +3,7 @@ use std::io::{Cursor, Error, ErrorKind, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
-use crate::rdb::{read_zip_list_entry, read_zm_len, Field, Item};
-use crate::resp::RespDecode;
+use crate::rdb::{read_zip_list_entry, read_zm_len, Field, Item, RDBDecode};
 
 /// 迭代器接口的定义（迭代器方便处理大key，减轻内存使用）
 ///

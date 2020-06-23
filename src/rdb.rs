@@ -17,13 +17,119 @@ use crate::cmd::Command;
 use crate::iter::{
     IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter,
 };
-use crate::resp::{RespDecode, MODULE_SET};
-use crate::{to_string, Event, EventHandler, ModuleParser, RDBParser};
+use crate::{lzf, to_string, Event, EventHandler, ModuleParser, RDBParser};
 use std::cell::RefCell;
+use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::iter::FromIterator;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
+
+/// 一些解析RDB数据的方法
+pub trait RDBDecode: Read {
+    /// 读取redis响应中下一条数据的长度
+    fn read_length(&mut self) -> Result<(isize, bool)> {
+        let byte = self.read_u8()?;
+        let _type = (byte & 0xC0) >> 6;
+
+        let mut result = -1;
+        let mut is_encoded = false;
+
+        if _type == RDB_ENCVAL {
+            result = (byte & 0x3F) as isize;
+            is_encoded = true;
+        } else if _type == RDB_6BITLEN {
+            result = (byte & 0x3F) as isize;
+        } else if _type == RDB_14BITLEN {
+            let next_byte = self.read_u8()?;
+            result = (((byte as u16 & 0x3F) << 8) | next_byte as u16) as isize;
+        } else if byte == RDB_32BITLEN {
+            result = self.read_integer(4, true)?;
+        } else if byte == RDB_64BITLEN {
+            result = self.read_integer(8, true)?;
+        };
+        Ok((result, is_encoded))
+    }
+
+    /// 从流中读取一个Integer
+    fn read_integer(&mut self, size: isize, is_big_endian: bool) -> Result<isize> {
+        let mut buff = vec![0; size as usize];
+        self.read_exact(&mut buff)?;
+        let mut cursor = Cursor::new(&buff);
+
+        if is_big_endian {
+            if size == 2 {
+                return Ok(cursor.read_i16::<BigEndian>()? as isize);
+            } else if size == 4 {
+                return Ok(cursor.read_i32::<BigEndian>()? as isize);
+            } else if size == 8 {
+                return Ok(cursor.read_i64::<BigEndian>()? as isize);
+            };
+        } else {
+            if size == 2 {
+                return Ok(cursor.read_i16::<LittleEndian>()? as isize);
+            } else if size == 4 {
+                return Ok(cursor.read_i32::<LittleEndian>()? as isize);
+            } else if size == 8 {
+                return Ok(cursor.read_i64::<LittleEndian>()? as isize);
+            };
+        }
+        panic!("Invalid integer size: {}", size)
+    }
+
+    /// 从流中读取一个string
+    fn read_string(&mut self) -> Result<Vec<u8>> {
+        let (length, is_encoded) = self.read_length()?;
+        if is_encoded {
+            match length {
+                RDB_ENC_INT8 => {
+                    let int = self.read_i8()?;
+                    return Ok(int.to_string().into_bytes());
+                }
+                RDB_ENC_INT16 => {
+                    let int = self.read_integer(2, false)?;
+                    return Ok(int.to_string().into_bytes());
+                }
+                RDB_ENC_INT32 => {
+                    let int = self.read_integer(4, false)?;
+                    return Ok(int.to_string().into_bytes());
+                }
+                RDB_ENC_LZF => {
+                    let (compressed_len, _) = self.read_length()?;
+                    let (origin_len, _) = self.read_length()?;
+                    let mut compressed = vec![0; compressed_len as usize];
+                    self.read_exact(&mut compressed)?;
+                    let mut origin = vec![0; origin_len as usize];
+                    lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
+                    return Ok(origin);
+                }
+                _ => panic!("Invalid string length: {}", length),
+            };
+        };
+        let mut buff = vec![0; length as usize];
+        self.read_exact(&mut buff)?;
+        Ok(buff)
+    }
+
+    /// 从流中读取一个double
+    fn read_double(&mut self) -> Result<f64> {
+        let len = self.read_u8()?;
+        return match len {
+            255 => Ok(NEG_INFINITY),
+            254 => Ok(INFINITY),
+            253 => Ok(NAN),
+            _ => {
+                let mut buff = vec![0; len as usize];
+                self.read_exact(&mut buff)?;
+                let score_str = to_string(buff);
+                let score = score_str.parse::<f64>().unwrap();
+                Ok(score)
+            }
+        };
+    }
+}
+
+impl<R: Read + ?Sized> RDBDecode for R {}
 
 pub(crate) struct DefaultRDBParser {
     pub(crate) running: Arc<AtomicBool>,
@@ -1123,3 +1229,10 @@ pub(crate) const RDB_ENC_INT32: isize = 2;
 /// string compressed with FASTLZ
 pub(crate) const RDB_ENC_LZF: isize = 3;
 pub(crate) const BATCH_SIZE: usize = 64;
+
+pub(crate) const MODULE_SET: [char; 64] = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
+    'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4',
+    '5', '6', '7', '8', '9', '-', '_',
+];
