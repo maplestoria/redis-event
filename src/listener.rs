@@ -4,7 +4,7 @@
 [`RedisListener`]: trait.RedisListener.html
 */
 use std::cell::RefCell;
-use std::io::Result;
+use std::io::{Read, Result};
 use std::net::TcpStream;
 use std::ops::DerefMut;
 use std::rc::Rc;
@@ -16,6 +16,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
+use native_tls::{TlsConnector, TlsStream};
 
 use crate::config::Config;
 use crate::io::send;
@@ -26,7 +27,7 @@ use crate::{cmd, io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, Re
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
     pub config: Config,
-    conn: Option<TcpStream>,
+    conn: Option<Stream>,
     rdb_parser: Rc<RefCell<dyn RDBParser>>,
     event_handler: Rc<RefCell<dyn EventHandler>>,
     heartbeat_thread: HeartbeatWorker,
@@ -37,23 +38,41 @@ pub struct Listener {
 impl Listener {
     /// 连接Redis，创建TCP连接
     fn connect(&mut self) -> Result<()> {
-        let stream = TcpStream::connect(self.config.addr)?;
+        let addr = format!("{}:{}", &self.config.host, self.config.port);
+        let stream = TcpStream::connect(&addr)?;
         stream
             .set_read_timeout(self.config.read_timeout)
             .expect("read timeout set failed");
         stream
             .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
-        info!("connected to server {}", self.config.addr.to_string());
-        self.conn = Option::Some(stream);
+        if self.config.is_tls_enabled {
+            let connector = TlsConnector::new().unwrap();
+            let tls_stream = connector
+                .connect(&self.config.host, stream)
+                .expect("TLS connect failed");
+            self.conn = Option::Some(Stream::Tls(tls_stream));
+        } else {
+            self.conn = Option::Some(Stream::Tcp(stream));
+        }
+        info!("connected to server {}", &addr);
         Ok(())
     }
 
     /// 如果有设置密码，将尝试使用此密码进行认证
     fn auth(&mut self) -> Result<()> {
         if !self.config.password.is_empty() {
-            let mut conn = self.conn.as_mut().unwrap();
-            send(&mut conn, b"AUTH", &[self.config.password.as_bytes()])?;
+            let conn = self.conn.as_mut().unwrap();
+            let conn: &mut dyn Read = match conn {
+                Stream::Tcp(tcp_stream) => {
+                    send(tcp_stream, b"AUTH", &[self.config.password.as_bytes()])?;
+                    tcp_stream
+                }
+                Stream::Tls(tls_stream) => {
+                    send(tls_stream, b"AUTH", &[self.config.password.as_bytes()])?;
+                    tls_stream
+                }
+            };
             conn.decode_resp()?;
         }
         Ok(())
@@ -61,11 +80,11 @@ impl Listener {
 
     /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
     fn send_port(&mut self) -> Result<()> {
-        let mut conn = self.conn.as_mut().unwrap();
-        let port = conn.local_addr()?.port().to_string();
-        let port = port.as_bytes();
-        send(&mut conn, b"REPLCONF", &[b"listening-port", port])?;
-        conn.decode_resp()?;
+        //        let mut conn = self.conn.as_mut().unwrap();
+        //        let port = conn.local_addr()?.port().to_string();
+        //        let port = port.as_bytes();
+        //        send(&mut conn, b"REPLCONF", &[b"listening-port", port])?;
+        //        conn.decode_resp()?;
         Ok(())
     }
 
@@ -84,14 +103,19 @@ impl Listener {
                     mode = Mode::PSync;
                 }
                 info!("Full Resync, size: {}bytes", length);
-                let mut conn = self.conn.as_mut().unwrap();
+                let conn = self.conn.as_mut().unwrap();
+
+                let conn: &mut dyn Read = match conn {
+                    Stream::Tcp(tcp_stream) => tcp_stream,
+                    Stream::Tls(tls_stream) => tls_stream,
+                };
                 if self.config.is_discard_rdb {
                     info!("跳过RDB不进行处理");
-                    io::skip(&mut conn, length as isize)?;
+                    io::skip(conn, length as isize)?;
                 } else {
                     let mut event_handler = self.event_handler.borrow_mut();
                     let mut rdb_parser = self.rdb_parser.borrow_mut();
-                    rdb_parser.parse(&mut conn, length, event_handler.deref_mut())?;
+                    rdb_parser.parse(conn, length, event_handler.deref_mut())?;
                 }
                 Ok(mode)
             }
@@ -108,8 +132,18 @@ impl Listener {
         let repl_offset = offset.as_bytes();
         let repl_id = self.config.repl_id.as_bytes();
 
-        let mut conn = self.conn.as_mut().unwrap();
-        send(&mut conn, b"PSYNC", &[repl_id, repl_offset])?;
+        let conn = self.conn.as_mut().unwrap();
+        let conn: &mut dyn Read = match conn {
+            Stream::Tcp(tcp_stream) => {
+                send(tcp_stream, b"PSYNC", &[repl_id, repl_offset])?;
+
+                tcp_stream
+            }
+            Stream::Tls(tls_stream) => {
+                send(tls_stream, b"PSYNC", &[repl_id, repl_offset])?;
+                tls_stream
+            }
+        };
 
         match conn.decode_resp() {
             Ok(response) => {
@@ -164,8 +198,17 @@ impl Listener {
     }
 
     fn sync(&mut self) -> Result<i64> {
-        let mut conn = self.conn.as_mut().unwrap();
-        send(&mut conn, b"SYNC", &vec![])?;
+        let conn = self.conn.as_mut().unwrap();
+        let conn: &mut dyn Read = match conn {
+            Stream::Tcp(tcp_stream) => {
+                send(tcp_stream, b"SYNC", &vec![])?;
+                tcp_stream
+            }
+            Stream::Tls(tls_stream) => {
+                send(tls_stream, b"SYNC", &vec![])?;
+                tls_stream
+            }
+        };
         if let Type::BulkString = conn.decode_type()? {
             if let Resp::Int(length) = conn.decode_int()? {
                 return Ok(length);
@@ -185,7 +228,14 @@ impl Listener {
         if let Mode::Sync = mode {
             return;
         }
+        if self.config.is_tls_enabled {
+            return;
+        }
         let conn = self.conn.as_ref().unwrap();
+        let conn = match conn {
+            Stream::Tcp(tcp_stream) => tcp_stream,
+            Stream::Tls(_) => panic!("Expect TcpStream"),
+        }; // TODO tls模式下心跳信息需要额外处理
         let mut conn_clone = conn.try_clone().unwrap();
 
         let (sender, receiver) = mpsc::channel();
@@ -222,10 +272,14 @@ impl Listener {
     }
 
     fn receive_aof(&mut self, mode: &Mode) -> Result<()> {
-        let mut conn = self.conn.as_ref().unwrap();
+        let conn = self.conn.as_mut().unwrap();
+        let mut conn: &mut dyn Read = match conn {
+            Stream::Tcp(tcp_stream) => tcp_stream,
+            Stream::Tls(tls_stream) => tls_stream,
+        };
         let mut reader = io::CountReader::new(&mut conn);
         let mut handler = self.event_handler.as_ref().borrow_mut();
-        while self.is_running() {
+        while self.running.load(Ordering::Relaxed) {
             reader.mark();
             if let Resp::Array(array) = reader.decode_resp()? {
                 let size = reader.reset()?;
@@ -407,4 +461,9 @@ impl Builder {
             running,
         }
     }
+}
+
+enum Stream {
+    Tcp(TcpStream),
+    Tls(TlsStream<TcpStream>),
 }
