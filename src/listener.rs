@@ -33,6 +33,7 @@ pub struct Listener {
     heartbeat_thread: HeartbeatWorker,
     sender: Option<mpsc::Sender<Message>>,
     running: Arc<AtomicBool>,
+    local_port: Option<u16>,
 }
 
 impl Listener {
@@ -46,8 +47,13 @@ impl Listener {
         stream
             .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
+        let local_port = stream.local_addr().unwrap().port();
+        self.local_port = Some(local_port);
         if self.config.is_tls_enabled {
-            let connector = TlsConnector::new().unwrap();
+            let mut builder = TlsConnector::builder();
+            builder.danger_accept_invalid_hostnames(true);
+            builder.danger_accept_invalid_certs(true);
+            let connector = builder.build().unwrap();
             let tls_stream = connector
                 .connect(&self.config.host, stream)
                 .expect("TLS connect failed");
@@ -80,11 +86,20 @@ impl Listener {
 
     /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
     fn send_port(&mut self) -> Result<()> {
-        //        let mut conn = self.conn.as_mut().unwrap();
-        //        let port = conn.local_addr()?.port().to_string();
-        //        let port = port.as_bytes();
-        //        send(&mut conn, b"REPLCONF", &[b"listening-port", port])?;
-        //        conn.decode_resp()?;
+        let port = self.local_port.unwrap().to_string();
+        let port = port.as_bytes();
+        let conn = self.conn.as_mut().unwrap();
+        let conn: &mut dyn Read = match conn {
+            Stream::Tcp(tcp_stream) => {
+                send(tcp_stream, b"REPLCONF", &[b"listening-port", port])?;
+                tcp_stream
+            }
+            Stream::Tls(tls_stream) => {
+                send(tls_stream, b"REPLCONF", &[b"listening-port", port])?;
+                tls_stream
+            }
+        };
+        conn.decode_resp()?;
         Ok(())
     }
 
@@ -272,41 +287,81 @@ impl Listener {
     }
 
     fn receive_aof(&mut self, mode: &Mode) -> Result<()> {
-        let conn = self.conn.as_mut().unwrap();
-        let mut conn: &mut dyn Read = match conn {
-            Stream::Tcp(tcp_stream) => tcp_stream,
-            Stream::Tls(tls_stream) => tls_stream,
-        };
-        let mut reader = io::CountReader::new(&mut conn);
         let mut handler = self.event_handler.as_ref().borrow_mut();
-        while self.running.load(Ordering::Relaxed) {
-            reader.mark();
-            if let Resp::Array(array) = reader.decode_resp()? {
-                let size = reader.reset()?;
-                let mut vec = Vec::with_capacity(array.len());
-                for x in array {
-                    if let Resp::BulkBytes(bytes) = x {
-                        vec.push(bytes);
+
+        let __conn = self.conn.as_mut().unwrap();
+        match __conn {
+            Stream::Tcp(tcp_stream) => {
+                let mut reader = io::CountReader::new(tcp_stream);
+
+                while self.running.load(Ordering::Relaxed) {
+                    reader.mark();
+                    if let Resp::Array(array) = reader.decode_resp()? {
+                        let size = reader.reset()?;
+                        let mut vec = Vec::with_capacity(array.len());
+                        for x in array {
+                            if let Resp::BulkBytes(bytes) = x {
+                                vec.push(bytes);
+                            } else {
+                                panic!("Expected BulkString response");
+                            }
+                        }
+                        self.config.repl_offset += size;
+                        if let Mode::PSync = mode {
+                            if let Err(error) = self
+                                .sender
+                                .as_ref()
+                                .unwrap()
+                                .send(Message::Some(self.config.repl_offset))
+                            {
+                                error!("repl offset send error: {}", error);
+                            }
+                        }
+                        cmd::parse(vec, handler.deref_mut());
                     } else {
-                        panic!("Expected BulkString response");
+                        panic!("Expected array response");
                     }
                 }
-                self.config.repl_offset += size;
-                if let Mode::PSync = mode {
-                    if let Err(error) = self
-                        .sender
-                        .as_ref()
-                        .unwrap()
-                        .send(Message::Some(self.config.repl_offset))
-                    {
-                        error!("repl offset send error: {}", error);
-                    }
-                }
-                cmd::parse(vec, handler.deref_mut());
-            } else {
-                panic!("Expected array response");
             }
-        }
+            Stream::Tls(tls_stream) => {
+                let mut timer = Instant::now();
+                let half_sec = Duration::from_millis(500);
+
+                while self.running.load(Ordering::Relaxed) {
+                    {
+                        let mut reader = io::CountReader::new(tls_stream);
+                        reader.mark();
+                        if let Resp::Array(array) = reader.decode_resp()? {
+                            let size = reader.reset()?;
+                            let mut vec = Vec::with_capacity(array.len());
+                            for x in array {
+                                if let Resp::BulkBytes(bytes) = x {
+                                    vec.push(bytes);
+                                } else {
+                                    panic!("Expected BulkString response");
+                                }
+                            }
+                            self.config.repl_offset += size;
+
+                            cmd::parse(vec, handler.deref_mut());
+                        } else {
+                            panic!("Expected array response");
+                        }
+                    }
+
+                    let elapsed = timer.elapsed();
+                    if elapsed.ge(&half_sec) {
+                        let offset_str = self.config.repl_offset.to_string();
+                        let offset_bytes = offset_str.as_bytes();
+                        if let Err(error) = send(tls_stream, b"REPLCONF", &[b"ACK", offset_bytes]) {
+                            error!("heartbeat error: {}", error);
+                            break;
+                        }
+                        timer = Instant::now();
+                    }
+                }
+            }
+        };
         Ok(())
     }
 
@@ -459,6 +514,7 @@ impl Builder {
             heartbeat_thread: HeartbeatWorker { thread: None },
             sender: None,
             running,
+            local_port: None,
         }
     }
 }
