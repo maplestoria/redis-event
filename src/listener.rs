@@ -16,13 +16,14 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
-use native_tls::{TlsConnector, TlsStream};
+use native_tls::{Identity, TlsConnector, TlsStream};
 
 use crate::config::Config;
 use crate::io::send;
 use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
 use crate::{cmd, io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
+use std::fs::File;
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
@@ -47,12 +48,27 @@ impl Listener {
         stream
             .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
+
         let local_port = stream.local_addr().unwrap().port();
         self.local_port = Some(local_port);
+
         if self.config.is_tls_enabled {
             let mut builder = TlsConnector::builder();
-            builder.danger_accept_invalid_hostnames(true);
-            builder.danger_accept_invalid_certs(true);
+            builder.danger_accept_invalid_hostnames(self.config.is_tls_insecure);
+            builder.danger_accept_invalid_certs(self.config.is_tls_insecure);
+
+            if let Some(id) = &self.config.identity {
+                let mut file = File::open(id)?;
+                let mut buff = Vec::new();
+                file.read_to_end(&mut buff)?;
+                let identity_passwd = match &self.config.identity_passwd {
+                    None => "",
+                    Some(passwd) => passwd.as_str(),
+                };
+                let identity = Identity::from_pkcs12(&buff, identity_passwd).expect("解析key失败");
+                builder.identity(identity);
+            }
+
             let connector = builder.build().unwrap();
             let tls_stream = connector
                 .connect(&self.config.host, stream)
