@@ -84,14 +84,19 @@ impl Listener {
     /// 如果有设置密码，将尝试使用此密码进行认证
     fn auth(&mut self) -> Result<()> {
         if !self.config.password.is_empty() {
+            let mut args = Vec::with_capacity(2);
+            if !self.config.username.is_empty() {
+                args.push(self.config.username.as_bytes());
+            }
+            args.push(self.config.password.as_bytes());
             let conn = self.conn.as_mut().unwrap();
             let conn: &mut dyn Read = match conn {
                 Stream::Tcp(tcp_stream) => {
-                    send(tcp_stream, b"AUTH", &[self.config.password.as_bytes()])?;
+                    send(tcp_stream, b"AUTH", &args)?;
                     tcp_stream
                 }
                 Stream::Tls(tls_stream) => {
-                    send(tls_stream, b"AUTH", &[self.config.password.as_bytes()])?;
+                    send(tls_stream, b"AUTH", &args)?;
                     tls_stream
                 }
             };

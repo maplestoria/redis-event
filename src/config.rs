@@ -16,6 +16,8 @@ pub struct Config {
     pub host: String,
     /// Redis的端口
     pub port: i16,
+    /// Redis的用户名
+    pub username: String,
     /// Redis的密码
     pub password: String,
     /// Replication ID
@@ -43,6 +45,7 @@ impl Clone for Config {
             is_aof: self.is_aof,
             host: self.host.clone(),
             port: self.port.clone(),
+            username: self.username.clone(),
             password: self.password.clone(),
             repl_id: self.repl_id.clone(),
             repl_offset: self.repl_offset,
