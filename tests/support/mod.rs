@@ -1,3 +1,9 @@
+/*
+Copyright (c) 2013-2019 by Armin Ronacher, Jan-Erik Rediger.
+
+Redis cluster code in parts copyright (c) 2018 by Atsushi Koge.
+*/
+
 #![allow(dead_code)]
 
 use std::{

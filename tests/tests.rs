@@ -842,11 +842,11 @@ fn test_aof() {
     assert_eq!(13, *cmd_count.lock().unwrap().deref());
 }
 
-#[serial]
 #[test]
+#[serial]
 fn test_tls() {
     env::set_var("REDISRS_SERVER_TYPE", "tcp+tls");
-    let mut context = TestContext::new();
+    let context = TestContext::new();
     let addr = context.server.get_client_addr();
     let (host, port) = match addr {
         ConnectionAddr::TcpTls { ref host, port, .. } => {
@@ -854,7 +854,7 @@ fn test_tls() {
         },
         _ => {panic!("wrong mode")}
     };
-    
+    println!("redis-server: {}:{}", host, port);
     let conf = Config {
         is_discard_rdb: true,
         is_aof: false,
@@ -879,12 +879,12 @@ fn test_tls() {
     builder.with_event_handler(Rc::new(RefCell::new(NoOpEventHandler {})));
     
     let mut redis_listener = builder.build();
-    
+    println!("connect to redis-server");
     if let Err(err) = redis_listener.start() {
         println!("error: {}", err);
         panic!(err);
     }
-    context.stop_server();
+    println!("done");
 }
 
 fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandler>>) {
