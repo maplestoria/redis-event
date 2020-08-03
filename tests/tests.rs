@@ -1,11 +1,9 @@
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::process::Command;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -748,16 +746,22 @@ fn test_aof() {
     let t = thread::spawn(move || {
         let cmd_handler = TestCmdHandler { pid, count: rc };
 
-        let ip = IpAddr::from_str("127.0.0.1").unwrap();
+        let ip = String::from("127.0.0.1");
         let conf = Config {
             is_discard_rdb: false,
             is_aof: true,
-            addr: SocketAddr::new(ip, port),
+            host: ip,
+            port,
             password: String::from("123456"),
             repl_id: String::from("?"),
             repl_offset: -1,
             read_timeout: None,
             write_timeout: None,
+            is_tls_enabled: false,
+            is_tls_insecure: false,
+            identity: None,
+            username: "".to_string(),
+            identity_passwd: None,
         };
         let running = Arc::new(AtomicBool::new(true));
 
@@ -838,16 +842,22 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
     // wait redis to start
     sleep(Duration::from_secs(2));
 
-    let ip = IpAddr::from_str("127.0.0.1").unwrap();
+    let ip = String::from("127.0.0.1");
     let conf = Config {
         is_discard_rdb: false,
         is_aof: false,
-        addr: SocketAddr::new(ip, port),
+        host: ip,
+        port: port as i16,
+        username: "".to_string(),
         password: String::new(),
         repl_id: String::from("?"),
         repl_offset: -1,
         read_timeout: None,
         write_timeout: None,
+        is_tls_enabled: false,
+        is_tls_insecure: false,
+        identity: None,
+        identity_passwd: None,
     };
     let running = Arc::new(AtomicBool::new(true));
 

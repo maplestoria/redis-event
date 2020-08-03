@@ -23,18 +23,24 @@
 * use redis_event::{NoOpEventHandler, RedisListener};
 *
 * fn main() -> std::io::Result<()> {
-*     let ip = IpAddr::from_str("127.0.0.1").unwrap();
+*     let ip = String::from("127.0.0.1");
 *     let port = 6379;
 *
 *     let conf = Config {
 *         is_discard_rdb: false,            // 不跳过RDB
 *         is_aof: false,                    // 不处理AOF
-*         addr: SocketAddr::new(ip, port),
+*         host: ip,
+*         port,
+*         username: String::new(),
 *         password: String::new(),          // 密码为空
 *         repl_id: String::from("?"),       // replication id，若无此id，设置为?即可
 *         repl_offset: -1,                  // replication offset，若无此offset，设置为-1即可
 *         read_timeout: None,               // None，即读取永不超时
 *         write_timeout: None,              // None，即写入永不超时
+*         is_tls_enabled: false,
+*         is_tls_insecure: false,
+*         identity: None,
+*         identity_passwd: None
 *     };
 *     let running = Arc::new(AtomicBool::new(true));
 *
