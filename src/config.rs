@@ -15,7 +15,7 @@ pub struct Config {
     /// Redis的地址
     pub host: String,
     /// Redis的端口
-    pub port: i16,
+    pub port: u16,
     /// Redis的用户名
     pub username: String,
     /// Redis的密码

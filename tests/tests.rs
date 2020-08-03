@@ -1,6 +1,7 @@
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
 use std::ops::{Deref, DerefMut};
 use std::process::Command;
 use std::rc::Rc;
@@ -12,12 +13,16 @@ use std::time::Duration;
 
 use redis;
 use redis::Commands;
+use redis::ConnectionAddr;
 use serial_test::serial;
 
 use redis_event::config::Config;
-use redis_event::listener;
+use redis_event::{listener, NoOpEventHandler};
 use redis_event::rdb::{ExpireType, Object};
 use redis_event::{cmd, Event, EventHandler, RedisListener};
+use crate::support::*;
+
+mod support;
 
 #[test]
 #[serial]
@@ -837,6 +842,51 @@ fn test_aof() {
     assert_eq!(13, *cmd_count.lock().unwrap().deref());
 }
 
+#[serial]
+#[test]
+fn test_tls() {
+    env::set_var("REDISRS_SERVER_TYPE", "tcp+tls");
+    let mut context = TestContext::new();
+    let addr = context.server.get_client_addr();
+    let (host, port) = match addr {
+        ConnectionAddr::TcpTls { ref host, port, .. } => {
+            (host, port)
+        },
+        _ => {panic!("wrong mode")}
+    };
+    
+    let conf = Config {
+        is_discard_rdb: true,
+        is_aof: false,
+        host: host.to_string(),
+        port: *port,
+        password: String::new(),
+        repl_id: String::from("?"),
+        repl_offset: -1,
+        read_timeout: None,
+        write_timeout: None,
+        is_tls_enabled: true,
+        is_tls_insecure: true,
+        identity: None,
+        username: "".to_string(),
+        identity_passwd: None,
+    };
+    let running = Arc::new(AtomicBool::new(true));
+    
+    let mut builder = listener::Builder::new();
+    builder.with_config(conf);
+    builder.with_control_flag(running);
+    builder.with_event_handler(Rc::new(RefCell::new(NoOpEventHandler {})));
+    
+    let mut redis_listener = builder.build();
+    
+    if let Err(err) = redis_listener.start() {
+        println!("error: {}", err);
+        panic!(err);
+    }
+    context.stop_server();
+}
+
 fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandler>>) {
     let pid = start_redis_server(rdb, port);
     // wait redis to start
@@ -847,7 +897,7 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
         is_discard_rdb: false,
         is_aof: false,
         host: ip,
-        port: port as i16,
+        port: port,
         username: "".to_string(),
         password: String::new(),
         repl_id: String::from("?"),
