@@ -439,7 +439,7 @@ fn test_regular_set() {
     }
     start_redis_test(
         "regular_set.rdb",
-        10010,
+        11110,
         Rc::new(RefCell::new(TestRdbHandler {
             map: HashMap::new(),
         })),
