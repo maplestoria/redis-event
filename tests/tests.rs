@@ -846,7 +846,7 @@ fn test_aof() {
 #[serial]
 fn test_tls() {
     env::set_var("REDISRS_SERVER_TYPE", "tcp+tls");
-    let context = TestContext::new();
+    let mut context = TestContext::new();
     let addr = context.server.get_client_addr();
     let (host, port) = match addr {
         ConnectionAddr::TcpTls { ref host, port, .. } => {
@@ -885,6 +885,7 @@ fn test_tls() {
         panic!(err);
     }
     println!("done");
+    context.stop_server();
 }
 
 fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandler>>) {

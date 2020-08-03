@@ -4,12 +4,10 @@ sudo: required
 
 dist: trusty
 
-addons:
-  apt:
-    packages:
-      - libssl-dev
-      - redis-server
-      - stunnel
+before_install: |
+  sudo add-apt-repository ppa:chris-lea/redis-server -y
+  sudo apt-get update
+  sudo apt-get install redis-server=5:6.0.5-1chl1~xenial1 stunnel openssl libssl-dev -y
 
 cache: cargo
 
