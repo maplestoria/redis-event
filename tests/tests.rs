@@ -16,11 +16,11 @@ use redis::Commands;
 use redis::ConnectionAddr;
 use serial_test::serial;
 
+use crate::support::*;
 use redis_event::config::Config;
-use redis_event::{listener, NoOpEventHandler};
 use redis_event::rdb::{ExpireType, Object};
 use redis_event::{cmd, Event, EventHandler, RedisListener};
-use crate::support::*;
+use redis_event::{listener, NoOpEventHandler};
 
 mod support;
 
@@ -849,10 +849,8 @@ fn test_tls() {
     let mut context = TestContext::new();
     let addr = context.server.get_client_addr();
     let (host, port) = match addr {
-        ConnectionAddr::TcpTls { ref host, port, .. } => {
-            (host, port)
-        },
-        _ => {panic!("wrong mode")}
+        ConnectionAddr::TcpTls { ref host, port, .. } => (host, port),
+        _ => panic!("wrong mode"),
     };
     println!("redis-server: {}:{}", host, port);
     let conf = Config {
@@ -872,12 +870,12 @@ fn test_tls() {
         identity_passwd: None,
     };
     let running = Arc::new(AtomicBool::new(true));
-    
+
     let mut builder = listener::Builder::new();
     builder.with_config(conf);
     builder.with_control_flag(running);
     builder.with_event_handler(Rc::new(RefCell::new(NoOpEventHandler {})));
-    
+
     let mut redis_listener = builder.build();
     println!("connect to redis-server");
     if let Err(err) = redis_listener.start() {

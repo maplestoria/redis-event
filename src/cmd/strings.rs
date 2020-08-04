@@ -175,6 +175,7 @@ pub struct SET<'a> {
     pub value: &'a [u8],
     pub expire: Option<(ExpireType, &'a Vec<u8>)>,
     pub exist_type: Option<ExistType>,
+    pub keep_ttl: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -202,7 +203,8 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     let mut expire_type = None;
     let mut exist_type = None;
     let mut expire = None;
-
+    let mut keep_ttl = None;
+    
     for arg in iter {
         let arg_string = String::from_utf8_lossy(arg);
         let p_arg = &arg_string.to_uppercase();
@@ -214,7 +216,9 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
             exist_type = Some(ExistType::NX);
         } else if p_arg == "XX" {
             exist_type = Some(ExistType::XX);
-        } else {
+        } else if p_arg == "KEEPTTL" {
+            keep_ttl = Some(true)
+        }else {
             // 读取过期时间
             expire_time = Some(arg);
         }
@@ -227,6 +231,7 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
         value,
         exist_type,
         expire,
+        keep_ttl
     }
 }
 

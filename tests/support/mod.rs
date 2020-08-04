@@ -6,14 +6,7 @@ Redis cluster code in parts copyright (c) 2018 by Atsushi Koge.
 
 #![allow(dead_code)]
 
-use std::{
-    env, fs,
-    io::{Write},
-    path::PathBuf,
-    process,
-    thread::sleep,
-    time::Duration,
-};
+use std::{env, fs, io::Write, path::PathBuf, process, thread::sleep, time::Duration};
 
 use std::string::ToString;
 
@@ -269,7 +262,7 @@ impl TestContext {
     pub fn connection(&self) -> redis::Connection {
         self.client.get_connection().unwrap()
     }
-    
+
     pub fn stop_server(&mut self) {
         self.server.stop();
     }
