@@ -9,7 +9,7 @@
 
 ```
 [dependencies]
-redis-event = "1.1.0"
+redis-event = "1.2.0"
 ```
 
 ## 原理
@@ -35,18 +35,24 @@ use redis_event::config::Config;
 use redis_event::{NoOpEventHandler, RedisListener};
 
 fn main() -> io::Result<()> {
-    let ip = IpAddr::from_str("127.0.0.1").unwrap();
+    let host = String::from("127.0.0.1");
     let port = 6379;
     
     let conf = Config {
         is_discard_rdb: false,            // 不跳过RDB
         is_aof: false,                    // 不处理AOF
-        addr: SocketAddr::new(ip, port),
+        host,
+        port,
+        username: String::new(),          // 用户名为空
         password: String::new(),          // 密码为空
         repl_id: String::from("?"),       // replication id，若无此id，设置为?即可
         repl_offset: -1,                  // replication offset，若无此offset，设置为-1即可
         read_timeout: None,               // None，即读取永不超时
         write_timeout: None,              // None，即写入永不超时
+        is_tls_enabled: false,            // 不启用TLS
+        is_tls_insecure: false,           // 未启用TLS，设置为false即可
+        identity: None,                   // 未启用TLS，设置为None即可
+        identity_passwd: None             // 未启用TLS，设置为None即可
     };
     let running = Arc::new(AtomicBool::new(true));
 

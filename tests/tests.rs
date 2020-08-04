@@ -1,11 +1,10 @@
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::env;
 use std::ops::{Deref, DerefMut};
 use std::process::Command;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -14,12 +13,16 @@ use std::time::Duration;
 
 use redis;
 use redis::Commands;
+use redis::ConnectionAddr;
 use serial_test::serial;
 
+use crate::support::*;
 use redis_event::config::Config;
-use redis_event::listener;
 use redis_event::rdb::{ExpireType, Object};
 use redis_event::{cmd, Event, EventHandler, RedisListener};
+use redis_event::{listener, NoOpEventHandler};
+
+mod support;
 
 #[test]
 #[serial]
@@ -436,7 +439,7 @@ fn test_regular_set() {
     }
     start_redis_test(
         "regular_set.rdb",
-        10010,
+        11110,
         Rc::new(RefCell::new(TestRdbHandler {
             map: HashMap::new(),
         })),
@@ -748,16 +751,22 @@ fn test_aof() {
     let t = thread::spawn(move || {
         let cmd_handler = TestCmdHandler { pid, count: rc };
 
-        let ip = IpAddr::from_str("127.0.0.1").unwrap();
+        let ip = String::from("127.0.0.1");
         let conf = Config {
             is_discard_rdb: false,
             is_aof: true,
-            addr: SocketAddr::new(ip, port),
+            host: ip,
+            port,
             password: String::from("123456"),
             repl_id: String::from("?"),
             repl_offset: -1,
             read_timeout: None,
             write_timeout: None,
+            is_tls_enabled: false,
+            is_tls_insecure: false,
+            identity: None,
+            username: "".to_string(),
+            identity_passwd: None,
         };
         let running = Arc::new(AtomicBool::new(true));
 
@@ -833,21 +842,71 @@ fn test_aof() {
     assert_eq!(13, *cmd_count.lock().unwrap().deref());
 }
 
-fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandler>>) {
-    let pid = start_redis_server(rdb, port);
-    // wait redis to start
-    sleep(Duration::from_secs(2));
-
-    let ip = IpAddr::from_str("127.0.0.1").unwrap();
+#[test]
+#[serial]
+fn test_tls() {
+    env::set_var("REDISRS_SERVER_TYPE", "tcp+tls");
+    let mut context = TestContext::new();
+    let addr = context.server.get_client_addr();
+    let (host, port) = match addr {
+        ConnectionAddr::TcpTls { ref host, port, .. } => (host, port),
+        _ => panic!("wrong mode"),
+    };
+    println!("redis-server: {}:{}", host, port);
     let conf = Config {
-        is_discard_rdb: false,
+        is_discard_rdb: true,
         is_aof: false,
-        addr: SocketAddr::new(ip, port),
+        host: host.to_string(),
+        port: *port,
         password: String::new(),
         repl_id: String::from("?"),
         repl_offset: -1,
         read_timeout: None,
         write_timeout: None,
+        is_tls_enabled: true,
+        is_tls_insecure: true,
+        identity: None,
+        username: "".to_string(),
+        identity_passwd: None,
+    };
+    let running = Arc::new(AtomicBool::new(true));
+
+    let mut builder = listener::Builder::new();
+    builder.with_config(conf);
+    builder.with_control_flag(running);
+    builder.with_event_handler(Rc::new(RefCell::new(NoOpEventHandler {})));
+
+    let mut redis_listener = builder.build();
+    println!("connect to redis-server");
+    if let Err(err) = redis_listener.start() {
+        println!("error: {}", err);
+        panic!(err);
+    }
+    println!("done");
+    context.stop_server();
+}
+
+fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandler>>) {
+    let pid = start_redis_server(rdb, port);
+    // wait redis to start
+    sleep(Duration::from_secs(2));
+
+    let ip = String::from("127.0.0.1");
+    let conf = Config {
+        is_discard_rdb: false,
+        is_aof: false,
+        host: ip,
+        port: port,
+        username: "".to_string(),
+        password: String::new(),
+        repl_id: String::from("?"),
+        repl_offset: -1,
+        read_timeout: None,
+        write_timeout: None,
+        is_tls_enabled: false,
+        is_tls_insecure: false,
+        identity: None,
+        identity_passwd: None,
     };
     let running = Arc::new(AtomicBool::new(true));
 
