@@ -14,7 +14,7 @@ cache: cargo
 rust:
   - stable
 
-before_cache: |
+before_script: |
   cargo install cargo-tarpaulin
 
 script:
