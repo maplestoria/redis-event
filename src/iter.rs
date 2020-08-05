@@ -148,8 +148,7 @@ impl ZipMapIter<'_> {
         let free = self.cursor.read_i8()?;
         let mut val = vec![0; zm_len];
         self.cursor.read_exact(&mut val)?;
-        self.cursor
-            .set_position(self.cursor.position() + free as u64);
+        self.cursor.set_position(self.cursor.position() + free as u64);
         return Ok(Field {
             name: field,
             value: val,

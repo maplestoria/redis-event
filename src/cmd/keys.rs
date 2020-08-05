@@ -78,10 +78,7 @@ pub struct PEXPIREAT<'a> {
 pub(crate) fn parse_pexpireat(mut iter: Iter<Vec<u8>>) -> PEXPIREAT {
     let key = iter.next().unwrap();
     let mill_timestamp = iter.next().unwrap();
-    PEXPIREAT {
-        key,
-        mill_timestamp,
-    }
+    PEXPIREAT { key, mill_timestamp }
 }
 
 #[derive(Debug)]

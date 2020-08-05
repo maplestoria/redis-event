@@ -78,11 +78,7 @@ pub(crate) fn parse_bitfield(mut iter: Iter<Vec<u8>>) -> BITFIELD {
             let _type = iter.next().unwrap();
             let offset = iter.next().expect("bitfield 缺失SET offset");
             let value = iter.next().expect("bitfield 缺失SET offset");
-            statements.push(Operation::SET(Set {
-                _type,
-                offset,
-                value,
-            }));
+            statements.push(Operation::SET(Set { _type, offset, value }));
         } else if arg_upper == "INCRBY" {
             let _type = iter.next().expect("bitfield 缺失INCR type");
             let offset = iter.next().expect("bitfield 缺失INCR offset");
@@ -204,7 +200,7 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
     let mut exist_type = None;
     let mut expire = None;
     let mut keep_ttl = None;
-    
+
     for arg in iter {
         let arg_string = String::from_utf8_lossy(arg);
         let p_arg = &arg_string.to_uppercase();
@@ -218,7 +214,7 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
             exist_type = Some(ExistType::XX);
         } else if p_arg == "KEEPTTL" {
             keep_ttl = Some(true)
-        }else {
+        } else {
             // 读取过期时间
             expire_time = Some(arg);
         }
@@ -231,7 +227,7 @@ pub(crate) fn parse_set(mut iter: Iter<Vec<u8>>) -> SET {
         value,
         exist_type,
         expire,
-        keep_ttl
+        keep_ttl,
     }
 }
 
@@ -246,11 +242,7 @@ pub(crate) fn parse_setex(mut iter: Iter<Vec<u8>>) -> SETEX {
     let key = iter.next().unwrap();
     let seconds = iter.next().unwrap();
     let value = iter.next().unwrap();
-    SETEX {
-        key,
-        seconds,
-        value,
-    }
+    SETEX { key, seconds, value }
 }
 
 #[derive(Debug)]

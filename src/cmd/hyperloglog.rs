@@ -48,8 +48,5 @@ pub(crate) fn parse_pfmerge(mut iter: Iter<Vec<u8>>) -> PFMERGE {
     while let Some(source) = iter.next() {
         source_keys.push(source.as_slice());
     }
-    PFMERGE {
-        dest_key,
-        source_keys,
-    }
+    PFMERGE { dest_key, source_keys }
 }

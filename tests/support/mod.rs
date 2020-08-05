@@ -25,11 +25,7 @@ pub struct RedisServer {
 
 impl ServerType {
     fn get_intended() -> ServerType {
-        match env::var("REDISRS_SERVER_TYPE")
-            .ok()
-            .as_ref()
-            .map(|x| &x[..])
-        {
+        match env::var("REDISRS_SERVER_TYPE").ok().as_ref().map(|x| &x[..]) {
             Some("tcp") => ServerType::Tcp { tls: false },
             Some("tcp+tls") => ServerType::Tcp { tls: true },
             Some("unix") => ServerType::Unix,
@@ -76,13 +72,10 @@ impl RedisServer {
     }
 
     pub fn new_with_addr<F: FnOnce(&mut process::Command) -> process::Child>(
-        addr: redis::ConnectionAddr,
-        spawner: F,
+        addr: redis::ConnectionAddr, spawner: F,
     ) -> RedisServer {
         let mut redis_cmd = process::Command::new("redis-server");
-        redis_cmd
-            .stdout(process::Stdio::null())
-            .stderr(process::Stdio::null());
+        redis_cmd.stdout(process::Stdio::null()).stderr(process::Stdio::null());
         let tempdir = tempdir::TempDir::new("redis").expect("failed to create tempdir");
         match addr {
             redis::ConnectionAddr::Tcp(ref bind, server_port) => {
@@ -170,11 +163,7 @@ impl RedisServer {
                 }
             }
             redis::ConnectionAddr::Unix(ref path) => {
-                redis_cmd
-                    .arg("--port")
-                    .arg("0")
-                    .arg("--unixsocket")
-                    .arg(&path);
+                redis_cmd.arg("--port").arg("0").arg("--unixsocket").arg(&path);
                 RedisServer {
                     process: spawner(&mut redis_cmd),
                     stunnel_process: None,

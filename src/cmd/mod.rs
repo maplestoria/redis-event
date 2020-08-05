@@ -471,10 +471,7 @@ pub(crate) fn parse(data: Vec<Vec<u8>>, cmd_handler: &mut dyn EventHandler) {
                 while let Some(arg) = iter.next() {
                     args.push(arg.clone());
                 }
-                let cmd = RawCommand {
-                    name: cmd_name,
-                    args,
-                };
+                let cmd = RawCommand { name: cmd_name, args };
                 cmd_handler.handle(Event::AOF(Command::Other(cmd)))
             }
         };

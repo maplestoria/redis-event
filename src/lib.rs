@@ -92,12 +92,7 @@ pub trait RDBParser {
     /// * `input`: RDB输入流
     /// * `length`: RDB的总长度
     /// * `event_handler`: Redis事件处理器
-    fn parse(
-        &mut self,
-        input: &mut dyn Read,
-        length: i64,
-        event_handler: &mut dyn EventHandler,
-    ) -> Result<()>;
+    fn parse(&mut self, input: &mut dyn Read, length: i64, event_handler: &mut dyn EventHandler) -> Result<()>;
 }
 
 /// Redis事件
@@ -135,12 +130,7 @@ pub trait ModuleParser {
     /// * `input`: RDB输入流
     /// * `module_name`: Module的名字
     /// * `module_version`: Module的版本
-    fn parse(
-        &mut self,
-        input: &mut dyn Read,
-        module_name: &str,
-        module_version: usize,
-    ) -> Box<dyn Module>;
+    fn parse(&mut self, input: &mut dyn Read, module_name: &str, module_version: usize) -> Box<dyn Module>;
 }
 
 /// 转换为utf-8字符串，不验证正确性

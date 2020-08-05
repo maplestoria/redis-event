@@ -17,8 +17,7 @@ mod rdb_tests {
 
     #[test]
     fn test_zipmap_not_compress() {
-        let mut file =
-            File::open("tests/rdb/zipmap_that_doesnt_compress_1.rdb").expect("file not found");
+        let mut file = File::open("tests/rdb/zipmap_that_doesnt_compress_1.rdb").expect("file not found");
 
         struct TestRdbHandler {
             map: HashMap<String, String>,
@@ -46,9 +45,7 @@ mod rdb_tests {
                 }
             }
         }
-        let mut handler = TestRdbHandler {
-            map: HashMap::new(),
-        };
+        let mut handler = TestRdbHandler { map: HashMap::new() };
 
         let mut rdb_parser = DefaultRDBParser {
             running: Arc::new(AtomicBool::new(true)),
@@ -59,8 +56,7 @@ mod rdb_tests {
 
     #[test]
     fn test_zipmap_compress() {
-        let mut file =
-            File::open("tests/rdb/zipmap_that_compresses_easily_1.rdb").expect("file not found");
+        let mut file = File::open("tests/rdb/zipmap_that_compresses_easily_1.rdb").expect("file not found");
 
         struct TestRdbHandler {
             map: HashMap<String, String>,
@@ -71,10 +67,7 @@ mod rdb_tests {
                 match data {
                     Event::RDB(rdb) => match rdb {
                         Object::Hash(hash) => {
-                            assert_eq!(
-                                "zipmap_compresses_easily",
-                                String::from_utf8_lossy(hash.key)
-                            );
+                            assert_eq!("zipmap_compresses_easily", String::from_utf8_lossy(hash.key));
                             for field in hash.fields {
                                 let name = String::from_utf8_lossy(&field.name).to_string();
                                 let val = String::from_utf8_lossy(&field.value).to_string();
@@ -84,10 +77,7 @@ mod rdb_tests {
                         Object::EOR => {
                             assert_eq!("aa", self.map.get("a").expect("field not found"));
                             assert_eq!("aaaa", self.map.get("aa").expect("field not found"));
-                            assert_eq!(
-                                "aaaaaaaaaaaaaa",
-                                self.map.get("aaaaa").expect("field not found")
-                            );
+                            assert_eq!("aaaaaaaaaaaaaa", self.map.get("aaaaa").expect("field not found"));
                         }
                         _ => {}
                     },
@@ -96,9 +86,7 @@ mod rdb_tests {
             }
         }
 
-        let mut handler = TestRdbHandler {
-            map: HashMap::new(),
-        };
+        let mut handler = TestRdbHandler { map: HashMap::new() };
 
         let mut rdb_parser = DefaultRDBParser {
             running: Arc::new(AtomicBool::new(true)),
@@ -123,10 +111,8 @@ mod rdb_tests {
                             let key = String::from_utf8_lossy(set.key).to_string();
                             assert_eq!("force_sorted_set", key);
                             for item in set.items {
-                                self.map.insert(
-                                    String::from_utf8_lossy(&item.member).to_string(),
-                                    item.score,
-                                );
+                                self.map
+                                    .insert(String::from_utf8_lossy(&item.member).to_string(), item.score);
                             }
                         }
                         Object::EOR => {
@@ -153,9 +139,7 @@ mod rdb_tests {
             }
         }
 
-        let mut handler = TestRdbHandler {
-            map: HashMap::new(),
-        };
+        let mut handler = TestRdbHandler { map: HashMap::new() };
 
         let mut rdb_parser = DefaultRDBParser {
             running: Arc::new(AtomicBool::new(true)),
@@ -166,8 +150,7 @@ mod rdb_tests {
 
     #[test]
     fn test_ziplist_that_compresses_easily() {
-        let mut file =
-            File::open("tests/rdb/ziplist_that_compresses_easily_1.rdb").expect("file not found");
+        let mut file = File::open("tests/rdb/ziplist_that_compresses_easily_1.rdb").expect("file not found");
 
         struct TestRdbHandler {
             list: Vec<String>,
@@ -178,10 +161,7 @@ mod rdb_tests {
                 match data {
                     Event::RDB(rdb) => match rdb {
                         Object::List(list) => {
-                            assert_eq!(
-                                "ziplist_compresses_easily",
-                                String::from_utf8_lossy(list.key)
-                            );
+                            assert_eq!("ziplist_compresses_easily", String::from_utf8_lossy(list.key));
                             for val in list.values {
                                 let value = String::from_utf8_lossy(val).to_string();
                                 self.list.push(value);
@@ -194,10 +174,7 @@ mod rdb_tests {
                             assert_eq!("aaaaaaaaaaaaaaaaaa", self.list.get(2).unwrap());
                             assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(3).unwrap());
                             assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(4).unwrap());
-                            assert_eq!(
-                                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                                self.list.get(5).unwrap()
-                            );
+                            assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(5).unwrap());
                         }
                         _ => {}
                     },
@@ -237,10 +214,8 @@ mod rdb_tests {
                                 _ => panic!("unknown key name: {}", key.as_ref()),
                             }
                             for item in set.items {
-                                self.map.insert(
-                                    String::from_utf8_lossy(&item.member).to_string(),
-                                    item.score,
-                                );
+                                self.map
+                                    .insert(String::from_utf8_lossy(&item.member).to_string(), item.score);
                             }
                         }
                         Object::EOR => {
@@ -249,15 +224,9 @@ mod rdb_tests {
                             assert_eq!(3.0, self.map.get("3").unwrap().clone());
                             assert_eq!(10001.0, self.map.get("10002").unwrap().clone());
                             assert_eq!(10003.0, self.map.get("10003").unwrap().clone());
-                            assert_eq!(
-                                1.0000000001E10,
-                                self.map.get("10000000001").unwrap().clone()
-                            );
+                            assert_eq!(1.0000000001E10, self.map.get("10000000001").unwrap().clone());
                             assert_eq!(10000000002.0, self.map.get("10000000002").unwrap().clone());
-                            assert_eq!(
-                                1.0000000003E10,
-                                self.map.get("10000000003").unwrap().clone()
-                            );
+                            assert_eq!(1.0000000003E10, self.map.get("10000000003").unwrap().clone());
                         }
                         _ => {}
                     },
@@ -266,9 +235,7 @@ mod rdb_tests {
             }
         }
 
-        let mut handler = TestRdbHandler {
-            map: HashMap::new(),
-        };
+        let mut handler = TestRdbHandler { map: HashMap::new() };
 
         let mut rdb_parser = DefaultRDBParser {
             running: Arc::new(AtomicBool::new(true)),
@@ -478,12 +445,7 @@ mod rdb_tests {
     }
 
     impl ModuleParser for HelloModuleParser {
-        fn parse(
-            &mut self,
-            input: &mut dyn Read,
-            _module_name: &str,
-            module_version: usize,
-        ) -> Box<dyn Module> {
+        fn parse(&mut self, input: &mut dyn Read, _module_name: &str, module_version: usize) -> Box<dyn Module> {
             let elements = self.load_unsigned(input, module_version);
             let elements = elements.to_u32().unwrap();
 
@@ -510,11 +472,10 @@ mod rdb_tests {
                 match event {
                     Event::RDB(rdb) => match rdb {
                         Object::Module(_, module, _) => {
-                            let hello_module: &HelloModule =
-                                match module.as_any().downcast_ref::<HelloModule>() {
-                                    Some(hello_module) => hello_module,
-                                    None => panic!("not HelloModule"),
-                                };
+                            let hello_module: &HelloModule = match module.as_any().downcast_ref::<HelloModule>() {
+                                Some(hello_module) => hello_module,
+                                None => panic!("not HelloModule"),
+                            };
                             let values = &hello_module.values;
                             assert_eq!(1, values.len());
                             let val = values.get(0).unwrap();
@@ -549,11 +510,10 @@ mod rdb_tests {
                 match event {
                     Event::RDB(rdb) => match rdb {
                         Object::Module(_, module, _) => {
-                            let hello_module: &HelloModule =
-                                match module.as_any().downcast_ref::<HelloModule>() {
-                                    Some(hello_module) => hello_module,
-                                    None => panic!("not HelloModule"),
-                                };
+                            let hello_module: &HelloModule = match module.as_any().downcast_ref::<HelloModule>() {
+                                Some(hello_module) => hello_module,
+                                None => panic!("not HelloModule"),
+                            };
                             let values = &hello_module.values;
                             assert_eq!(2, values.len());
                             let val1 = values.get(0).unwrap();

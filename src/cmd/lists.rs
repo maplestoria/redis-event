@@ -113,11 +113,7 @@ pub(crate) fn parse_lrem(mut iter: Iter<Vec<u8>>) -> LREM {
     let key = iter.next().unwrap();
     let count = iter.next().unwrap();
     let element = iter.next().unwrap();
-    LREM {
-        key,
-        count,
-        element,
-    }
+    LREM { key, count, element }
 }
 
 #[derive(Debug)]
@@ -131,11 +127,7 @@ pub(crate) fn parse_lset(mut iter: Iter<Vec<u8>>) -> LSET {
     let key = iter.next().unwrap();
     let index = iter.next().unwrap();
     let element = iter.next().unwrap();
-    LSET {
-        key,
-        index,
-        element,
-    }
+    LSET { key, index, element }
 }
 
 #[derive(Debug)]
@@ -171,10 +163,7 @@ pub struct RPOPLPUSH<'a> {
 pub(crate) fn parse_rpoplpush(mut iter: Iter<Vec<u8>>) -> RPOPLPUSH {
     let source = iter.next().unwrap();
     let destination = iter.next().unwrap();
-    RPOPLPUSH {
-        source,
-        destination,
-    }
+    RPOPLPUSH { source, destination }
 }
 
 #[derive(Debug)]

@@ -34,11 +34,7 @@ pub(crate) fn parse_hincrby(mut iter: Iter<Vec<u8>>) -> HINCRBY {
     let key = iter.next().unwrap();
     let field = iter.next().unwrap();
     let increment = iter.next().unwrap();
-    HINCRBY {
-        key,
-        field,
-        increment,
-    }
+    HINCRBY { key, field, increment }
 }
 
 #[derive(Debug)]

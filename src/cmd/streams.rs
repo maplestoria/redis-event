@@ -176,20 +176,12 @@ pub(crate) fn parse_xgroup(mut iter: Iter<Vec<u8>>) -> XGROUP {
             let key = iter.next().unwrap();
             let group_name = iter.next().unwrap();
             let id = iter.next().unwrap();
-            create = Some(Create {
-                key,
-                group_name,
-                id,
-            })
+            create = Some(Create { key, group_name, id })
         } else if p_arg == "SETID" {
             let key = iter.next().unwrap();
             let group_name = iter.next().unwrap();
             let id = iter.next().unwrap();
-            set_id = Some(SetID {
-                key,
-                group_name,
-                id,
-            })
+            set_id = Some(SetID { key, group_name, id })
         } else if p_arg == "DESTROY" {
             let key = iter.next().unwrap();
             let group_name = iter.next().unwrap();

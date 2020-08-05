@@ -74,11 +74,7 @@ pub(crate) fn parse_zincrby(mut iter: Iter<Vec<u8>>) -> ZINCRBY {
     let key = iter.next().unwrap();
     let increment = iter.next().unwrap();
     let member = iter.next().unwrap();
-    ZINCRBY {
-        key,
-        increment,
-        member,
-    }
+    ZINCRBY { key, increment, member }
 }
 
 #[derive(Debug)]

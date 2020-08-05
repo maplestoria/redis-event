@@ -48,11 +48,7 @@ fn test_hash() {
         }
     }
 
-    start_redis_test(
-        "dictionary.rdb",
-        10000,
-        Rc::new(RefCell::new(TestRdbHandler {})),
-    );
+    start_redis_test("dictionary.rdb", 10000, Rc::new(RefCell::new(TestRdbHandler {})));
 }
 
 #[test]
@@ -84,11 +80,7 @@ fn test_hash_1() {
         }
     }
 
-    start_redis_test(
-        "hash_as_ziplist.rdb",
-        10001,
-        Rc::new(RefCell::new(TestRdbHandler {})),
-    );
+    start_redis_test("hash_as_ziplist.rdb", 10001, Rc::new(RefCell::new(TestRdbHandler {})));
 }
 
 #[test]
@@ -142,16 +134,10 @@ fn test_integer() {
                     Object::EOR => {
                         assert_eq!(self.map.get("125").unwrap(), "Positive 8 bit integer");
                         assert_eq!(self.map.get("43947").unwrap(), "Positive 16 bit integer");
-                        assert_eq!(
-                            self.map.get("183358245").unwrap(),
-                            "Positive 32 bit integer"
-                        );
+                        assert_eq!(self.map.get("183358245").unwrap(), "Positive 32 bit integer");
                         assert_eq!(self.map.get("-123").unwrap(), "Negative 8 bit integer");
                         assert_eq!(self.map.get("-29477").unwrap(), "Negative 16 bit integer");
-                        assert_eq!(
-                            self.map.get("-183358245").unwrap(),
-                            "Negative 32 bit integer"
-                        );
+                        assert_eq!(self.map.get("-183358245").unwrap(), "Negative 32 bit integer");
                     }
                     _ => {}
                 },
@@ -163,9 +149,7 @@ fn test_integer() {
     start_redis_test(
         "integer_keys.rdb",
         10003,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -204,9 +188,7 @@ fn test_intset16() {
     start_redis_test(
         "intset_16.rdb",
         10004,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -245,9 +227,7 @@ fn test_intset32() {
     start_redis_test(
         "intset_32.rdb",
         10005,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -272,11 +252,7 @@ fn test_intset64() {
                     }
                     Object::EOR => {
                         let values = self.map.get("intset_64").unwrap();
-                        let arr = [
-                            "9223090557583032318",
-                            "9223090557583032317",
-                            "9223090557583032316",
-                        ];
+                        let arr = ["9223090557583032318", "9223090557583032317", "9223090557583032316"];
                         for val in values {
                             assert!(arr.contains(&val.as_str()));
                         }
@@ -290,9 +266,7 @@ fn test_intset64() {
     start_redis_test(
         "intset_64.rdb",
         10006,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -322,11 +296,7 @@ fn test_keys_with_expiry() {
             }
         }
     }
-    start_redis_test(
-        "keys_with_expiry.rdb",
-        10007,
-        Rc::new(RefCell::new(TestRdbHandler {})),
-    );
+    start_redis_test("keys_with_expiry.rdb", 10007, Rc::new(RefCell::new(TestRdbHandler {})));
 }
 
 #[test]
@@ -440,9 +410,7 @@ fn test_regular_set() {
     start_redis_test(
         "regular_set.rdb",
         11110,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -461,10 +429,8 @@ fn test_regular_sorted_set() {
                         let key = String::from_utf8_lossy(set.key).to_string();
                         assert_eq!("force_sorted_set", key);
                         for item in set.items {
-                            self.map.insert(
-                                String::from_utf8_lossy(&item.member).to_string(),
-                                item.score,
-                            );
+                            self.map
+                                .insert(String::from_utf8_lossy(&item.member).to_string(), item.score);
                         }
                     }
                     Object::EOR => {
@@ -493,9 +459,7 @@ fn test_regular_sorted_set() {
     start_redis_test(
         "regular_sorted_set.rdb",
         10011,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -533,9 +497,7 @@ fn test_zipmap_big_values() {
     start_redis_test(
         "zipmap_with_big_values.rdb",
         10012,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -551,10 +513,7 @@ fn test_zipmap_compress() {
             match data {
                 Event::RDB(rdb) => match rdb {
                     Object::Hash(hash) => {
-                        assert_eq!(
-                            "zipmap_compresses_easily",
-                            String::from_utf8_lossy(hash.key)
-                        );
+                        assert_eq!("zipmap_compresses_easily", String::from_utf8_lossy(hash.key));
                         for field in hash.fields {
                             let name = String::from_utf8_lossy(&field.name).to_string();
                             let val = String::from_utf8_lossy(&field.value).to_string();
@@ -575,9 +534,7 @@ fn test_zipmap_compress() {
     start_redis_test(
         "zipmap_that_compresses_easily.rdb",
         10013,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -613,9 +570,7 @@ fn test_zipmap_not_compress() {
     start_redis_test(
         "zipmap_that_doesnt_compress.rdb",
         10014,
-        Rc::new(RefCell::new(TestRdbHandler {
-            map: HashMap::new(),
-        })),
+        Rc::new(RefCell::new(TestRdbHandler { map: HashMap::new() })),
     );
 }
 
@@ -631,10 +586,7 @@ fn test_ziplist() {
             match data {
                 Event::RDB(rdb) => match rdb {
                     Object::List(list) => {
-                        assert_eq!(
-                            "ziplist_compresses_easily",
-                            String::from_utf8_lossy(list.key)
-                        );
+                        assert_eq!("ziplist_compresses_easily", String::from_utf8_lossy(list.key));
                         for val in list.values {
                             let value = String::from_utf8_lossy(val).to_string();
                             self.list.push(value);
@@ -647,10 +599,7 @@ fn test_ziplist() {
                         assert_eq!("aaaaaaaaaaaaaaaaaa", self.list.get(2).unwrap());
                         assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(3).unwrap());
                         assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(4).unwrap());
-                        assert_eq!(
-                            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                            self.list.get(5).unwrap()
-                        );
+                        assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", self.list.get(5).unwrap());
                     }
                     _ => {}
                 },
@@ -829,10 +778,7 @@ fn test_aof() {
             let _: () = conn.expire_at("list", 1000).unwrap();
             // flush all, end the test
             let _: () = redis::cmd("FLUSHDB").arg("ASYNC").query(&mut conn).unwrap();
-            let _: () = redis::cmd("FLUSHALL")
-                .arg("ASYNC")
-                .query(&mut conn)
-                .unwrap();
+            let _: () = redis::cmd("FLUSHALL").arg("ASYNC").query(&mut conn).unwrap();
             t.join().expect("thread error");
         } else {
             shutdown_redis(pid);

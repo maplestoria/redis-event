@@ -14,9 +14,7 @@ use log::info;
 
 use crate::cmd::connection::SELECT;
 use crate::cmd::Command;
-use crate::iter::{
-    IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter,
-};
+use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
 use crate::{lzf, to_string, Event, EventHandler, ModuleParser, RDBParser};
 use std::cell::RefCell;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
@@ -137,12 +135,7 @@ pub(crate) struct DefaultRDBParser {
 }
 
 impl RDBParser for DefaultRDBParser {
-    fn parse(
-        &mut self,
-        input: &mut dyn Read,
-        _: i64,
-        event_handler: &mut dyn EventHandler,
-    ) -> Result<()> {
+    fn parse(&mut self, input: &mut dyn Read, _: i64, event_handler: &mut dyn EventHandler) -> Result<()> {
         event_handler.handle(Event::RDB(Object::BOR));
         let mut bytes = vec![0; 5];
         // 开头5个字节: REDIS
@@ -244,11 +237,7 @@ impl RDBParser for DefaultRDBParser {
 impl DefaultRDBParser {
     // 根据传入的数据类型，从流中读取对应类型的数据
     fn read_object(
-        &mut self,
-        input: &mut dyn Read,
-        value_type: u8,
-        event_handler: &mut dyn EventHandler,
-        meta: &Meta,
+        &mut self, input: &mut dyn Read, value_type: u8, event_handler: &mut dyn EventHandler, meta: &Meta,
     ) -> Result<()> {
         match value_type {
             RDB_TYPE_STRING => {
@@ -380,10 +369,7 @@ impl DefaultRDBParser {
                 let bytes = input.read_string()?;
                 let cursor = &mut Cursor::new(&bytes);
                 cursor.set_position(1);
-                let mut iter = ZipMapIter {
-                    has_more: true,
-                    cursor,
-                };
+                let mut iter = ZipMapIter { has_more: true, cursor };
 
                 let mut has_more = true;
                 while has_more {
@@ -484,8 +470,7 @@ impl DefaultRDBParser {
                         let score: f64;
                         if let Ok(next_val) = iter.next() {
                             member = next_val;
-                            let score_str =
-                                to_string(iter.next().expect("missing sorted set element's score"));
+                            let score_str = to_string(iter.next().expect("missing sorted set element's score"));
                             score = score_str.parse::<f64>().unwrap();
                             val.push(Item { member, score });
                         } else {
@@ -579,10 +564,7 @@ impl DefaultRDBParser {
                 let module_name: String = String::from_iter(array.iter());
                 let module_version: usize = module_id & 1023;
                 if self.module_parser.is_none() && value_type == RDB_TYPE_MODULE {
-                    panic!(
-                        "MODULE {}, version {} 无法解析",
-                        module_name, module_version
-                    );
+                    panic!("MODULE {}, version {} 无法解析", module_name, module_version);
                 }
                 if let Some(parser) = &mut self.module_parser {
                     let module: Box<dyn Module>;
@@ -596,9 +578,7 @@ impl DefaultRDBParser {
                             );
                         }
                     } else {
-                        module = parser
-                            .borrow_mut()
-                            .parse(input, &module_name, module_version);
+                        module = parser.borrow_mut().parse(input, &module_name, module_version);
                     }
                     event_handler.handle(Event::RDB(Object::Module(key, module, meta)));
                 } else {
@@ -635,11 +615,7 @@ impl DefaultRDBParser {
         Ok(())
     }
 
-    fn read_stream_list_packs<'a>(
-        &mut self,
-        meta: &'a Meta,
-        input: &mut dyn Read,
-    ) -> Result<Stream<'a>> {
+    fn read_stream_list_packs<'a>(&mut self, meta: &'a Meta, input: &mut dyn Read) -> Result<Stream<'a>> {
         let mut entries: BTreeMap<ID, Entry> = BTreeMap::new();
         let (length, _) = input.read_length()?;
         for _ in 0..length {
@@ -653,8 +629,7 @@ impl DefaultRDBParser {
             list_pack.set_position(6);
             let count = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
             let deleted = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
-            let num_fields =
-                i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+            let num_fields = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
             let mut tmp_fields = Vec::with_capacity(num_fields as usize);
             for _ in 0..num_fields {
                 tmp_fields.push(read_list_pack_entry(&mut list_pack)?);
@@ -664,8 +639,7 @@ impl DefaultRDBParser {
             let total = count + deleted;
             for _ in 0..total {
                 let mut fields = BTreeMap::new();
-                let flag =
-                    i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+                let flag = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
                 let ms = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
                 let seq = i64::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
                 let id = ID {
@@ -679,30 +653,15 @@ impl DefaultRDBParser {
                         let field = tmp_fields.get(i as usize).unwrap().to_vec();
                         fields.insert(field, value);
                     }
-                    entries.insert(
-                        id,
-                        Entry {
-                            id,
-                            deleted,
-                            fields,
-                        },
-                    );
+                    entries.insert(id, Entry { id, deleted, fields });
                 } else {
-                    let num_fields =
-                        i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
+                    let num_fields = i32::from_str(&to_string(read_list_pack_entry(&mut list_pack)?)).unwrap();
                     for _ in 0..num_fields {
                         let field = read_list_pack_entry(&mut list_pack)?;
                         let value = read_list_pack_entry(&mut list_pack)?;
                         fields.insert(field, value);
                     }
-                    entries.insert(
-                        id,
-                        Entry {
-                            id,
-                            deleted,
-                            fields,
-                        },
-                    );
+                    entries.insert(id, Entry { id, deleted, fields });
                 }
                 read_list_pack_entry(&mut list_pack)?;
             }
@@ -750,11 +709,7 @@ impl DefaultRDBParser {
                 }
             }
         }
-        Ok(Stream {
-            entries,
-            groups,
-            meta,
-        })
+        Ok(Stream { entries, groups, meta })
     }
 }
 
@@ -1231,8 +1186,7 @@ pub(crate) const RDB_ENC_LZF: isize = 3;
 pub(crate) const BATCH_SIZE: usize = 64;
 
 pub(crate) const MODULE_SET: [char; 64] = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
-    'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4',
-    '5', '6', '7', '8', '9', '-', '_',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W',
+    'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
+    'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '_',
 ];

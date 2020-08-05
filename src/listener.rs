@@ -293,8 +293,7 @@ impl Listener {
                 if elapsed.ge(&half_sec) {
                     let offset_str = offset.to_string();
                     let offset_bytes = offset_str.as_bytes();
-                    if let Err(error) = send(&mut conn_clone, b"REPLCONF", &[b"ACK", offset_bytes])
-                    {
+                    if let Err(error) = send(&mut conn_clone, b"REPLCONF", &[b"ACK", offset_bytes]) {
                         error!("heartbeat error: {}", error);
                         break;
                     }
