@@ -4,7 +4,7 @@
 [`RedisListener`]: trait.RedisListener.html
 */
 use std::cell::RefCell;
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
 use std::ops::DerefMut;
 use std::rc::Rc;
@@ -190,15 +190,17 @@ impl Listener {
                     Stream::Tcp(tcp_stream) => tcp_stream,
                     Stream::Tls(tls_stream) => tls_stream,
                 };
+                let mut reader = BufReader::new(conn);
+                reader.fill_buf()?;
                 if length != -1 && self.config.is_discard_rdb {
                     info!("跳过RDB不进行处理");
-                    io::skip(conn, length as isize)?;
+                    io::skip(&mut reader, length as isize)?;
                 } else {
                     let mut event_handler = self.event_handler.borrow_mut();
                     let mut rdb_parser = self.rdb_parser.borrow_mut();
-                    rdb_parser.parse(conn, length, event_handler.deref_mut())?;
+                    rdb_parser.parse(&mut reader, length, event_handler.deref_mut())?;
                     if length == -1 {
-                        io::skip(conn, 40)?;
+                        io::skip(&mut reader, 40)?;
                     }
                 }
                 Ok(mode)
@@ -321,7 +323,7 @@ impl Listener {
         let conn = match conn {
             Stream::Tcp(tcp_stream) => tcp_stream,
             Stream::Tls(_) => panic!("Expect TcpStream"),
-        }; // TODO tls模式下心跳信息需要额外处理
+        };
         let mut conn_clone = conn.try_clone().unwrap();
 
         let (sender, receiver) = mpsc::channel();
@@ -329,10 +331,10 @@ impl Listener {
         let t = thread::spawn(move || {
             let mut offset = 0;
             let mut timer = Instant::now();
-            let half_sec = Duration::from_millis(500);
+            let one_sec = Duration::from_secs(1);
             info!("heartbeat thread started");
             loop {
-                match receiver.recv_timeout(half_sec) {
+                match receiver.recv_timeout(one_sec) {
                     Ok(Message::Terminate) => break,
                     Ok(Message::Some(new_offset)) => {
                         offset = new_offset;
@@ -340,7 +342,7 @@ impl Listener {
                     Err(_) => {}
                 };
                 let elapsed = timer.elapsed();
-                if elapsed.ge(&half_sec) {
+                if elapsed.ge(&one_sec) {
                     let offset_str = offset.to_string();
                     let offset_bytes = offset_str.as_bytes();
                     if let Err(error) = send(&mut conn_clone, b"REPLCONF", &[b"ACK", offset_bytes]) {
@@ -395,7 +397,7 @@ impl Listener {
             }
             Stream::Tls(tls_stream) => {
                 let mut timer = Instant::now();
-                let half_sec = Duration::from_millis(500);
+                let one_sec = Duration::from_secs(1);
 
                 while self.running.load(Ordering::Relaxed) {
                     {
@@ -420,7 +422,7 @@ impl Listener {
                     }
 
                     let elapsed = timer.elapsed();
-                    if elapsed.ge(&half_sec) {
+                    if elapsed.ge(&one_sec) {
                         let offset_str = self.config.repl_offset.to_string();
                         let offset_bytes = offset_str.as_bytes();
                         if let Err(error) = send(tls_stream, b"REPLCONF", &[b"ACK", offset_bytes]) {
