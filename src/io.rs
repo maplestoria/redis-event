@@ -3,10 +3,10 @@
 */
 
 use crate::resp::*;
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::io::{BufReader, Error, ErrorKind, Read, Result, Write};
 
 pub(crate) struct CountReader<'a> {
-    input: &'a mut dyn Read,
+    input: BufReader<&'a mut dyn Read>,
     len: i64,
     marked: bool,
 }
@@ -32,7 +32,7 @@ impl Read for CountReader<'_> {
 impl CountReader<'_> {
     pub(crate) fn new(input: &mut dyn Read) -> CountReader {
         CountReader {
-            input,
+            input: BufReader::new(input),
             len: 0,
             marked: false,
         }

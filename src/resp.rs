@@ -2,7 +2,7 @@
 Redis Serialization Protocol相关的解析代码
 */
 
-use std::io::{Error, ErrorKind, Read, Result};
+use std::io::{Read, Result};
 
 use byteorder::ReadBytesExt;
 
@@ -15,7 +15,7 @@ pub trait RespDecode: Read {
         match self.decode_type()? {
             Type::String => Ok(Resp::String(self.decode_string()?)),
             Type::Int => self.decode_int(),
-            Type::Error => Err(Error::new(ErrorKind::InvalidData, self.decode_string()?)),
+            Type::Error => Ok(Resp::Error(self.decode_string()?)),
             Type::BulkString => self.decode_bulk_string(),
             Type::Array => self.decode_array(),
         }
@@ -116,6 +116,7 @@ pub enum Type {
 pub enum Resp {
     String(String),
     Int(i64),
+    Error(String),
     BulkBytes(Vec<u8>),
     Array(Vec<Resp>),
 }

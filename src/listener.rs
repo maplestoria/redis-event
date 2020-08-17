@@ -4,7 +4,7 @@
 [`RedisListener`]: trait.RedisListener.html
 */
 use std::cell::RefCell;
-use std::io::{Read, Result};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Read, Result, Write};
 use std::net::TcpStream;
 use std::ops::DerefMut;
 use std::rc::Rc;
@@ -15,7 +15,7 @@ use std::thread;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use log::{error, info};
+use log::{error, info, warn};
 use native_tls::{Identity, TlsConnector, TlsStream};
 
 use crate::config::Config;
@@ -34,6 +34,7 @@ pub struct Listener {
     heartbeat_thread: HeartbeatWorker,
     sender: Option<mpsc::Sender<Message>>,
     running: Arc<AtomicBool>,
+    local_ip: Option<String>,
     local_port: Option<u16>,
 }
 
@@ -49,7 +50,11 @@ impl Listener {
             .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
 
-        let local_port = stream.local_addr().unwrap().port();
+        let socket_addr = stream.local_addr().unwrap();
+        let local_ip = socket_addr.ip().to_string();
+        self.local_ip = Some(local_ip);
+
+        let local_port = socket_addr.port();
         self.local_port = Some(local_port);
 
         if self.config.is_tls_enabled {
@@ -77,7 +82,7 @@ impl Listener {
         } else {
             self.conn = Option::Some(Stream::Tcp(stream));
         }
-        info!("connected to server {}", &addr);
+        info!("Connected to server {}", &addr);
         Ok(())
     }
 
@@ -105,22 +110,58 @@ impl Listener {
         Ok(())
     }
 
-    /// 发送本地所使用的socket端口到redis，此端口展现在`info replication`中
-    fn send_port(&mut self) -> Result<()> {
+    /// 发送replica相关信息到redis，此端口展现在`info replication`中
+    fn send_replica_info(&mut self) -> Result<()> {
         let port = self.local_port.unwrap().to_string();
         let port = port.as_bytes();
+
+        let ip = self.local_ip.as_ref().unwrap();
+        let ip = ip.as_bytes();
+
         let conn = self.conn.as_mut().unwrap();
-        let conn: &mut dyn Read = match conn {
-            Stream::Tcp(tcp_stream) => {
-                send(tcp_stream, b"REPLCONF", &[b"listening-port", port])?;
-                tcp_stream
-            }
-            Stream::Tls(tls_stream) => {
-                send(tls_stream, b"REPLCONF", &[b"listening-port", port])?;
-                tls_stream
-            }
+        match conn {
+            Stream::Tcp(tcp_stream) => Listener::de_send_replica_info(&port, &ip, tcp_stream)?,
+            Stream::Tls(tls_stream) => Listener::de_send_replica_info(&port, &ip, tls_stream)?,
         };
-        conn.decode_resp()?;
+        Ok(())
+    }
+
+    fn de_send_replica_info<T: Write + Read>(port: &&[u8], ip: &&[u8], tcp_stream: &mut T) -> Result<()> {
+        info!("PING");
+        send(tcp_stream, b"PING", &vec![])?;
+        Listener::reply(tcp_stream)?;
+
+        info!("REPLCONF listening-port {}", String::from_utf8_lossy(*port));
+        send(tcp_stream, b"REPLCONF", &[b"listening-port", port])?;
+        Listener::reply(tcp_stream)?;
+
+        info!("REPLCONF ip-address {}", String::from_utf8_lossy(*ip));
+        send(tcp_stream, b"REPLCONF", &[b"ip-address", ip])?;
+        Listener::reply(tcp_stream)?;
+
+        info!("REPLCONF capa eof");
+        send(tcp_stream, b"REPLCONF", &[b"capa", b"eof"])?;
+        Listener::reply(tcp_stream)?;
+
+        info!("REPLCONF capa psync2");
+        send(tcp_stream, b"REPLCONF", &[b"capa", b"psync2"])?;
+        Listener::reply(tcp_stream)
+    }
+
+    fn reply<T: Read>(tcp_stream: &mut T) -> Result<()> {
+        match tcp_stream.decode_resp()? {
+            Resp::String(str) => info!("{}", str),
+            Resp::Error(err) => {
+                warn!("{}", &err);
+                if (err.contains("NOAUTH") || err.contains("NOPERM"))
+                    && !err.contains("no password")
+                    && !err.contains("Unrecognized REPLCONF option")
+                {
+                    return Err(Error::new(ErrorKind::InvalidData, err));
+                }
+            }
+            _ => panic!("Unexpected response type"),
+        }
         Ok(())
     }
 
@@ -138,20 +179,29 @@ impl Listener {
                 } else {
                     mode = Mode::PSync;
                 }
-                info!("Full Resync, size: {}bytes", length);
+                if length != -1 {
+                    info!("Full Sync, size: {}bytes", length);
+                } else {
+                    info!("Disk-less replication.");
+                }
                 let conn = self.conn.as_mut().unwrap();
 
                 let conn: &mut dyn Read = match conn {
                     Stream::Tcp(tcp_stream) => tcp_stream,
                     Stream::Tls(tls_stream) => tls_stream,
                 };
-                if self.config.is_discard_rdb {
+                let mut reader = BufReader::new(conn);
+                reader.fill_buf()?;
+                if length != -1 && self.config.is_discard_rdb {
                     info!("跳过RDB不进行处理");
-                    io::skip(conn, length as isize)?;
+                    io::skip(&mut reader, length as isize)?;
                 } else {
                     let mut event_handler = self.event_handler.borrow_mut();
                     let mut rdb_parser = self.rdb_parser.borrow_mut();
-                    rdb_parser.parse(conn, length, event_handler.deref_mut())?;
+                    rdb_parser.parse(&mut reader, length, event_handler.deref_mut())?;
+                    if length == -1 {
+                        io::skip(&mut reader, 40)?;
+                    }
                 }
                 Ok(mode)
             }
@@ -199,10 +249,12 @@ impl Listener {
                         }
                         info!("等待Redis dump完成...");
                         if let Type::BulkString = conn.decode_type()? {
-                            if let Resp::Int(length) = conn.decode_int()? {
-                                return Ok((NextStep::FullSync, length));
+                            let reply = conn.decode_string()?;
+                            if reply.starts_with("EOF") {
+                                return Ok((NextStep::FullSync, -1));
                             } else {
-                                panic!("Expect int response")
+                                let length = reply.parse::<i64>().unwrap();
+                                return Ok((NextStep::FullSync, length));
                             }
                         } else {
                             panic!("Expect BulkString response");
@@ -271,7 +323,7 @@ impl Listener {
         let conn = match conn {
             Stream::Tcp(tcp_stream) => tcp_stream,
             Stream::Tls(_) => panic!("Expect TcpStream"),
-        }; // TODO tls模式下心跳信息需要额外处理
+        };
         let mut conn_clone = conn.try_clone().unwrap();
 
         let (sender, receiver) = mpsc::channel();
@@ -279,10 +331,10 @@ impl Listener {
         let t = thread::spawn(move || {
             let mut offset = 0;
             let mut timer = Instant::now();
-            let half_sec = Duration::from_millis(500);
+            let one_sec = Duration::from_secs(1);
             info!("heartbeat thread started");
             loop {
-                match receiver.recv_timeout(half_sec) {
+                match receiver.recv_timeout(one_sec) {
                     Ok(Message::Terminate) => break,
                     Ok(Message::Some(new_offset)) => {
                         offset = new_offset;
@@ -290,7 +342,7 @@ impl Listener {
                     Err(_) => {}
                 };
                 let elapsed = timer.elapsed();
-                if elapsed.ge(&half_sec) {
+                if elapsed.ge(&one_sec) {
                     let offset_str = offset.to_string();
                     let offset_bytes = offset_str.as_bytes();
                     if let Err(error) = send(&mut conn_clone, b"REPLCONF", &[b"ACK", offset_bytes]) {
@@ -345,7 +397,7 @@ impl Listener {
             }
             Stream::Tls(tls_stream) => {
                 let mut timer = Instant::now();
-                let half_sec = Duration::from_millis(500);
+                let one_sec = Duration::from_secs(1);
 
                 while self.running.load(Ordering::Relaxed) {
                     {
@@ -370,7 +422,7 @@ impl Listener {
                     }
 
                     let elapsed = timer.elapsed();
-                    if elapsed.ge(&half_sec) {
+                    if elapsed.ge(&one_sec) {
                         let offset_str = self.config.repl_offset.to_string();
                         let offset_bytes = offset_str.as_bytes();
                         if let Err(error) = send(tls_stream, b"REPLCONF", &[b"ACK", offset_bytes]) {
@@ -398,7 +450,7 @@ impl RedisListener for Listener {
     fn start(&mut self) -> Result<()> {
         self.connect()?;
         self.auth()?;
-        self.send_port()?;
+        self.send_replica_info()?;
         let mut mode;
         loop {
             mode = self.start_sync()?;
@@ -534,6 +586,7 @@ impl Builder {
             heartbeat_thread: HeartbeatWorker { thread: None },
             sender: None,
             running,
+            local_ip: None,
             local_port: None,
         }
     }
