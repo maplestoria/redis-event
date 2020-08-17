@@ -83,7 +83,9 @@ impl RedisServer {
                     .arg("--port")
                     .arg(server_port.to_string())
                     .arg("--bind")
-                    .arg(bind);
+                    .arg(bind)
+                    .arg("--repl-diskless-sync")
+                    .arg("yes");
 
                 RedisServer {
                     process: spawner(&mut redis_cmd),
