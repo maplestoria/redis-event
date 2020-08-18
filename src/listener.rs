@@ -9,7 +9,7 @@ use std::net::TcpStream;
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::result::Result::Ok;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering, AtomicI64};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::thread::sleep;
@@ -24,6 +24,7 @@ use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
 use crate::{cmd, io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
 use std::fs::File;
+use scheduled_thread_pool::ScheduledThreadPool;
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
@@ -36,6 +37,8 @@ pub struct Listener {
     running: Arc<AtomicBool>,
     local_ip: Option<String>,
     local_port: Option<u16>,
+    thread_pool: Arc<ScheduledThreadPool>,
+    repl_offset: AtomicI64,
 }
 
 impl Listener {
@@ -378,18 +381,11 @@ impl Listener {
                                 panic!("Expected BulkString response");
                             }
                         }
-                        self.config.repl_offset += size;
-                        if let Mode::PSync = mode {
-                            if let Err(error) = self
-                                .sender
-                                .as_ref()
-                                .unwrap()
-                                .send(Message::Some(self.config.repl_offset))
-                            {
-                                error!("repl offset send error: {}", error);
-                            }
-                        }
                         cmd::parse(vec, handler.deref_mut());
+                        if let Mode::PSync = mode {
+                            self.config.repl_offset += size;
+                            self.repl_offset.store(self.config.repl_offset, Ordering::SeqCst);
+                        }
                     } else {
                         panic!("Expected array response");
                     }
@@ -413,9 +409,8 @@ impl Listener {
                                     panic!("Expected BulkString response");
                                 }
                             }
-                            self.config.repl_offset += size;
-
                             cmd::parse(vec, handler.deref_mut());
+                            self.config.repl_offset += size;
                         } else {
                             panic!("Expected array response");
                         }
@@ -516,6 +511,7 @@ pub struct Builder {
     pub event_handler: Option<Rc<RefCell<dyn EventHandler>>>,
     pub module_parser: Option<Rc<RefCell<dyn ModuleParser>>>,
     pub control_flag: Option<Arc<AtomicBool>>,
+    pub thread_pool: Option<Arc<ScheduledThreadPool>>,
 }
 
 impl Builder {
@@ -526,11 +522,13 @@ impl Builder {
             event_handler: None,
             module_parser: None,
             control_flag: None,
+            thread_pool: None
         }
     }
 
-    pub fn with_config(&mut self, config: Config) {
+    pub fn with_config(mut self, config: Config) -> Builder {
         self.config = Some(config);
+        self
     }
 
     pub fn with_rdb_parser(&mut self, parser: Rc<RefCell<dyn RDBParser>>) {
@@ -549,6 +547,10 @@ impl Builder {
         self.control_flag = Some(flag);
     }
 
+    pub fn with_thread_pool(&mut self, thread_pool: Arc<ScheduledThreadPool>) {
+        self.thread_pool = Option::Some(thread_pool);
+    }
+    
     pub fn build(&mut self) -> Listener {
         let config = match &self.config {
             Some(c) => c,
@@ -577,7 +579,12 @@ impl Builder {
             None => Rc::new(RefCell::new(NoOpEventHandler {})),
             Some(handler) => handler.clone(),
         };
-
+    
+        let thread_pool = match &self.thread_pool {
+            None => Arc::new(ScheduledThreadPool::with_name("hearbeat-thread-{}", 1)),
+            Some(pool) => Arc::clone(pool),
+        };
+        
         Listener {
             config: config.clone(),
             conn: None,
@@ -588,6 +595,8 @@ impl Builder {
             running,
             local_ip: None,
             local_port: None,
+            thread_pool,
+            repl_offset: AtomicI64::from(config.repl_offset),
         }
     }
 }
