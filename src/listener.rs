@@ -9,9 +9,8 @@ use std::net::TcpStream;
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::result::Result::Ok;
-use std::sync::atomic::{AtomicBool, Ordering, AtomicI64};
-use std::sync::{mpsc, Arc};
-use std::thread;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -23,8 +22,8 @@ use crate::io::send;
 use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
 use crate::{cmd, io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
+use scheduled_thread_pool::{JobHandle, ScheduledThreadPool};
 use std::fs::File;
-use scheduled_thread_pool::ScheduledThreadPool;
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
@@ -33,12 +32,11 @@ pub struct Listener {
     rdb_parser: Rc<RefCell<dyn RDBParser>>,
     event_handler: Rc<RefCell<dyn EventHandler>>,
     heartbeat_thread: HeartbeatWorker,
-    sender: Option<mpsc::Sender<Message>>,
     running: Arc<AtomicBool>,
     local_ip: Option<String>,
     local_port: Option<u16>,
     thread_pool: Arc<ScheduledThreadPool>,
-    repl_offset: AtomicI64,
+    repl_offset: Arc<AtomicI64>,
 }
 
 impl Listener {
@@ -328,37 +326,19 @@ impl Listener {
             Stream::Tls(_) => panic!("Expect TcpStream"),
         };
         let mut conn_clone = conn.try_clone().unwrap();
-
-        let (sender, receiver) = mpsc::channel();
-
-        let t = thread::spawn(move || {
-            let mut offset = 0;
-            let mut timer = Instant::now();
-            let one_sec = Duration::from_secs(1);
-            info!("heartbeat thread started");
-            loop {
-                match receiver.recv_timeout(one_sec) {
-                    Ok(Message::Terminate) => break,
-                    Ok(Message::Some(new_offset)) => {
-                        offset = new_offset;
-                    }
-                    Err(_) => {}
-                };
-                let elapsed = timer.elapsed();
-                if elapsed.ge(&one_sec) {
-                    let offset_str = offset.to_string();
+        info!("Start heartbeat");
+        let repl_offset = Arc::clone(&self.repl_offset);
+        let handle =
+            self.thread_pool
+                .execute_with_fixed_delay(Duration::from_secs(0), Duration::from_secs(1), move || {
+                    let offset_str = repl_offset.load(Ordering::Relaxed).to_string();
                     let offset_bytes = offset_str.as_bytes();
                     if let Err(error) = send(&mut conn_clone, b"REPLCONF", &[b"ACK", offset_bytes]) {
                         error!("heartbeat error: {}", error);
-                        break;
                     }
-                    timer = Instant::now();
-                }
-            }
-            info!("heartbeat thread terminated");
-        });
-        self.heartbeat_thread = HeartbeatWorker { thread: Some(t) };
-        self.sender = Some(sender);
+                });
+
+        self.heartbeat_thread = HeartbeatWorker { handle: Some(handle) };
     }
 
     fn receive_aof(&mut self, mode: &Mode) -> Result<()> {
@@ -472,24 +452,15 @@ impl RedisListener for Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        if let Some(sender) = self.sender.as_ref() {
-            if let Err(err) = sender.send(Message::Terminate) {
-                error!("Closing heartbeat thread error: {}", err)
-            }
-        }
-        if let Some(thread) = self.heartbeat_thread.thread.take() {
-            if let Err(_) = thread.join() {}
+        if let Some(handle) = &self.heartbeat_thread.handle {
+            info!("Cancel heartbeat");
+            handle.cancel();
         }
     }
 }
 
 struct HeartbeatWorker {
-    thread: Option<thread::JoinHandle<()>>,
-}
-
-enum Message {
-    Terminate,
-    Some(i64),
+    handle: Option<JobHandle>,
 }
 
 enum NextStep {
@@ -522,13 +493,12 @@ impl Builder {
             event_handler: None,
             module_parser: None,
             control_flag: None,
-            thread_pool: None
+            thread_pool: None,
         }
     }
 
-    pub fn with_config(mut self, config: Config) -> Builder {
+    pub fn with_config(&mut self, config: Config) {
         self.config = Some(config);
-        self
     }
 
     pub fn with_rdb_parser(&mut self, parser: Rc<RefCell<dyn RDBParser>>) {
@@ -550,7 +520,7 @@ impl Builder {
     pub fn with_thread_pool(&mut self, thread_pool: Arc<ScheduledThreadPool>) {
         self.thread_pool = Option::Some(thread_pool);
     }
-    
+
     pub fn build(&mut self) -> Listener {
         let config = match &self.config {
             Some(c) => c,
@@ -579,24 +549,23 @@ impl Builder {
             None => Rc::new(RefCell::new(NoOpEventHandler {})),
             Some(handler) => handler.clone(),
         };
-    
+
         let thread_pool = match &self.thread_pool {
             None => Arc::new(ScheduledThreadPool::with_name("hearbeat-thread-{}", 1)),
             Some(pool) => Arc::clone(pool),
         };
-        
+
         Listener {
             config: config.clone(),
             conn: None,
             rdb_parser,
             event_handler,
-            heartbeat_thread: HeartbeatWorker { thread: None },
-            sender: None,
+            heartbeat_thread: HeartbeatWorker { handle: None },
             running,
             local_ip: None,
             local_port: None,
             thread_pool,
-            repl_offset: AtomicI64::from(config.repl_offset),
+            repl_offset: Arc::new(AtomicI64::from(config.repl_offset)),
         }
     }
 }
