@@ -10,6 +10,8 @@ use std::{env, fs, io::Write, path::PathBuf, process, thread::sleep, time::Durat
 
 use std::string::ToString;
 
+use redis::ProtocolVersion;
+
 #[derive(PartialEq)]
 enum ServerType {
     Tcp { tls: bool },
@@ -223,6 +225,7 @@ impl TestContext {
                 db: 0,
                 username: None,
                 password: None,
+                protocol: ProtocolVersion::RESP2,
             },
         })
         .unwrap();
@@ -249,7 +252,7 @@ impl TestContext {
                 }
             }
         }
-        redis::cmd("FLUSHDB").execute(&mut con);
+        redis::cmd("FLUSHDB").exec(&mut con).unwrap();
 
         TestContext { server, client }
     }
