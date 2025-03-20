@@ -16,12 +16,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Build
+      run: cargo build --verbose
+    
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: debug
+
+    steps:
+    - uses: actions/checkout@v4
+
     # Cache Cargo dependencies
     - name: Cache Cargo
       uses: actions/cache@v3
       with:
         path: ~/.cargo
-        key: ${{ runner.os }}-cargo
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Set up Redis and stunnel
       run: |
@@ -35,9 +47,6 @@ jobs:
     - name: Install tarpaulin
       run: cargo install cargo-tarpaulin
       
-    - name: Build
-      run: cargo build --verbose
-    
     - name: Run tests
       run: cargo tarpaulin --out Xml
       
