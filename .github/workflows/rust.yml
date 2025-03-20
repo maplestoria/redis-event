@@ -35,12 +35,6 @@ jobs:
         path: ~/.cargo
         key: ${{ runner.os }}-cargo
     
-    - name: Cache apt-get dependencies
-      uses: actions/cache@v3
-      with:
-        path: /var/cache/apt
-        key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/apt-dependencies.txt') }}
-
     - name: Set up Redis and stunnel
       run: |
         sudo apt-get install lsb-release curl gpg
@@ -49,8 +43,6 @@ jobs:
         echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
         sudo apt-get update
         sudo apt-get install redis stunnel openssl libssl-dev -y
-        # Save the list of installed packages to a file
-        dpkg-query -W -f='${binary:Package}\n' > apt-dependencies.txt
         
     - name: Install tarpaulin
       run: cargo install cargo-tarpaulin
