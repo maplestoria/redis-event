@@ -9,8 +9,8 @@ use std::net::TcpStream;
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::result::Result::Ok;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -21,7 +21,7 @@ use crate::config::Config;
 use crate::io::send;
 use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
-use crate::{cmd, io, EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener};
+use crate::{EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener, cmd, io};
 use scheduled_thread_pool::{JobHandle, ScheduledThreadPool};
 use std::fs::File;
 
@@ -551,7 +551,12 @@ impl Builder {
         };
 
         let thread_pool = match &self.thread_pool {
-            None => Arc::new(ScheduledThreadPool::with_name("hearbeat-thread-{}", 1)),
+            None => Arc::new(
+                ScheduledThreadPool::builder()
+                    .num_threads(1)
+                    .thread_name_pattern("hearbeat-thread-{}")
+                    .build(),
+            ),
             Some(pool) => Arc::clone(pool),
         };
 

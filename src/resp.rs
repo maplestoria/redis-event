@@ -160,7 +160,7 @@ mod test {
                 }
                 _ => panic!("wrong type"),
             },
-            Err(err) => panic!(err),
+            Err(err) => panic!("{}", err),
         }
     }
 }
