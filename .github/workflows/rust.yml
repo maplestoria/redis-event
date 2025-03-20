@@ -40,3 +40,9 @@ jobs:
     
     - name: Run tests
       run: cargo tarpaulin --out Xml
+      
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@v2
+      with:
+        token: ${{secrets.CODECOV_TOKEN}}
+        fail_ci_if_error: true
