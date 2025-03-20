@@ -6,13 +6,13 @@ mod rdb_tests {
     use std::fs::File;
     use std::io::Read;
     use std::rc::Rc;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     use num_bigint::Sign;
     use num_traits::ToPrimitive;
 
-    use crate::rdb::{DefaultRDBParser, EvictType, ExpireType, Module, Object, RDBDecode, ID};
+    use crate::rdb::{DefaultRDBParser, EvictType, ExpireType, ID, Module, Object, RDBDecode};
     use crate::{Event, EventHandler, ModuleParser, RDBParser};
 
     #[test]
@@ -287,7 +287,7 @@ mod rdb_tests {
 
                             for val in list.values {
                                 let val = String::from_utf8_lossy(val);
-                                vec.contains(&val.as_ref());
+                                assert!(vec.contains(&val.as_ref()));
                             }
                         }
                         _ => {}
@@ -722,7 +722,7 @@ mod aof_tests {
 
     use crate::cmd::Command;
     use crate::resp::{Resp, RespDecode};
-    use crate::{cmd, Event, EventHandler};
+    use crate::{Event, EventHandler, cmd};
     use std::io::ErrorKind;
 
     #[test]

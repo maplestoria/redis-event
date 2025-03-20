@@ -1,3 +1,4 @@
+use core::panic;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,10 +20,16 @@ use serial_test::serial;
 use crate::support::*;
 use redis_event::config::Config;
 use redis_event::rdb::{ExpireType, Object};
-use redis_event::{cmd, Event, EventHandler, RedisListener};
-use redis_event::{listener, NoOpEventHandler};
+use redis_event::{Event, EventHandler, RedisListener, cmd};
+use redis_event::{NoOpEventHandler, listener};
 
 mod support;
+
+#[cfg(test)]
+#[ctor::ctor]
+fn init() {
+    env_logger::init();
+}
 
 #[test]
 #[serial]
@@ -94,7 +101,10 @@ fn test_string() {
                 Event::RDB(rdb) => match rdb {
                     Object::String(kv) => {
                         let key = String::from_utf8_lossy(kv.key);
-                        assert_eq!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", key);
+                        assert_eq!(
+                            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            key
+                        );
                         assert_eq!(
                             "Key that redis should compress easily",
                             String::from_utf8_lossy(kv.value)
@@ -731,7 +741,7 @@ fn test_aof() {
         }
     });
     // wait thread start
-    thread::sleep(Duration::from_secs(2));
+    thread::sleep(Duration::from_secs(10));
 
     let uri = format!("redis://:123456@127.0.0.1:{}", port);
 
@@ -783,6 +793,8 @@ fn test_aof() {
         } else {
             shutdown_redis(pid);
         }
+    } else {
+        shutdown_redis(pid);
     }
 
     assert_eq!(13, *cmd_count.lock().unwrap().deref());
@@ -791,11 +803,13 @@ fn test_aof() {
 #[test]
 #[serial]
 fn test_tls() {
-    env::set_var("REDISRS_SERVER_TYPE", "tcp+tls");
+    unsafe {
+        env::set_var("REDISRS_SERVER_TYPE", "tcp+tls");
+    }
     let mut context = TestContext::new();
     let addr = context.server.get_client_addr();
     let (host, port) = match addr {
-        ConnectionAddr::TcpTls { ref host, port, .. } => (host, port),
+        ConnectionAddr::TcpTls { host, port, .. } => (host, port),
         _ => panic!("wrong mode"),
     };
     println!("redis-server: {}:{}", host, port);
@@ -826,7 +840,7 @@ fn test_tls() {
     println!("connect to redis-server");
     if let Err(err) = redis_listener.start() {
         println!("error: {}", err);
-        panic!(err);
+        panic!("{}", err);
     }
     println!("done");
     context.stop_server();
@@ -865,7 +879,8 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
 
     if let Err(error) = redis_listener.start() {
         eprintln!("error: {}", error);
-        panic!(error)
+        shutdown_redis(pid);
+        panic!("{}", error)
     }
     shutdown_redis(pid);
 }
