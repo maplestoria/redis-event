@@ -16,7 +16,21 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    
     - name: Build
       run: cargo build --verbose
+
+    - name: Set up Redis and stunnel
+      run: |
+        sudo apt-get install lsb-release curl gpg
+        curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+        sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+        sudo apt-get update
+        sudo apt-get install redis stunnel openssl libssl-dev -y
+        
+    - name: Install tarpaulin
+      run: cargo install cargo-tarpaulin
+      
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo tarpaulin --out Xml
