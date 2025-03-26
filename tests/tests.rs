@@ -2,6 +2,7 @@ use core::panic;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
 use std::ops::{Deref, DerefMut};
 use std::process::Command;
 use std::rc::Rc;
@@ -13,12 +14,14 @@ use std::time::Duration;
 
 use redis;
 use redis::Commands;
+use redis::ConnectionAddr;
 use serial_test::serial;
 
+use crate::support::*;
 use redis_event::config::Config;
 use redis_event::rdb::{ExpireType, Object};
 use redis_event::{Event, EventHandler, RedisListener, cmd};
-use redis_event::listener;
+use redis_event::{NoOpEventHandler, listener};
 
 mod support;
 
