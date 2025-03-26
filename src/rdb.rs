@@ -12,10 +12,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use log::info;
 
-use crate::cmd::connection::SELECT;
 use crate::cmd::Command;
+use crate::cmd::connection::SELECT;
 use crate::iter::{IntSetIter, Iter, QuickListIter, SortedSetIter, StrValIter, ZipListIter, ZipMapIter};
-use crate::{lzf, to_string, Event, EventHandler, ModuleParser, RDBParser};
+use crate::{Event, EventHandler, ModuleParser, RDBParser, lzf, to_string};
 use std::cell::RefCell;
 use std::f64::{INFINITY, NAN, NEG_INFINITY};
 use std::iter::FromIterator;
@@ -223,6 +223,12 @@ impl RDBParser for DefaultRDBParser {
                         input.read_integer(8, true)?;
                     }
                     break;
+                }
+                RDB_OPCODE_FUNCTION => {
+                    unimplemented!()
+                }
+                RDB_OPCODE_FUNCTION2 => {
+                    unimplemented!()
                 }
                 _ => {
                     self.read_object(input, data_type, event_handler, &meta)?;
@@ -591,7 +597,133 @@ impl DefaultRDBParser {
                 let stream = self.read_stream_list_packs(meta, input)?;
                 event_handler.handle(Event::RDB(Object::Stream(key, stream)));
             }
-            _ => panic!("unknown data type: {}", value_type),
+            RDB_TYPE_HASH_LISTPACK => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                cursor.set_position(4);
+                let mut length = cursor.read_u16::<LittleEndian>()?;
+                let mut fields = Vec::new();
+                while length > 0 {
+                    let field = read_list_pack_entry(cursor)?;
+                    length -= 1;
+                    let value = read_list_pack_entry(cursor)?;
+                    length -= 1;
+                    let field = Field {
+                        name: field,
+                        value: value,
+                    };
+                    fields.push(field);
+                }
+                let end = cursor.read_u8()?;
+                if end != 255 {
+                    panic!("listpack expect 255 but {}", end);
+                }
+                event_handler.handle(Event::RDB(Object::Hash(Hash {
+                    key: &key,
+                    fields: &fields,
+                    meta,
+                })));
+            }
+            RDB_TYPE_ZSET_LISTPACK => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                cursor.set_position(4);
+                let mut length = cursor.read_u16::<LittleEndian>()?;
+                let mut items = Vec::new();
+                while length > 0 {
+                    let member = read_list_pack_entry(cursor)?;
+                    length -= 1;
+                    let score = read_list_pack_entry(cursor)?;
+                    length -= 1;
+                    let score = to_string(score);
+                    let score = score.parse::<f64>().unwrap();
+                    let item = Item { member, score };
+                    items.push(item);
+                }
+                let end = cursor.read_u8()?;
+                if end != 255 {
+                    panic!("listpack expect 255 but {}", end);
+                }
+                event_handler.handle(Event::RDB(Object::SortedSet(SortedSet {
+                    key: &key,
+                    items: &items,
+                    meta,
+                })));
+            }
+            RDB_TYPE_LIST_QUICKLIST_2 => {
+                let key = input.read_string()?;
+                let (len, _) = input.read_length()?;
+                let mut vec = Vec::new();
+                for _ in 0..len {
+                    let (container, _) = input.read_length()?;
+                    let bytes = input.read_string()?;
+                    let cursor = &mut Cursor::new(bytes);
+                    if container == 1 {
+                        vec.push(vec![cursor.read_u8()?]);
+                    } else if container == 2 {
+                        cursor.set_position(4);
+                        let size = cursor.read_u16::<LittleEndian>()?;
+                        for _ in 0..size {
+                            let value = read_list_pack_entry(cursor)?;
+                            vec.push(value);
+                        }
+                        let end = cursor.read_u8()?;
+                        if end != 255 {
+                            panic!("listpack expect 255 but {}", end);
+                        }
+                    } else {
+                        panic!("invalid quicklist container: {}", container);
+                    }
+                }
+                event_handler.handle(Event::RDB(Object::List(List {
+                    key: &key,
+                    values: &vec,
+                    meta,
+                })));
+            }
+            RDB_TYPE_STREAM_LISTPACKS_2 => {
+                unimplemented!()
+            }
+            RDB_TYPE_SET_LISTPACK => {
+                let key = input.read_string()?;
+                let bytes = input.read_string()?;
+                let cursor = &mut Cursor::new(bytes);
+                cursor.set_position(4);
+                let mut length = cursor.read_u16::<LittleEndian>()?;
+                let mut members = Vec::new();
+                while length > 0 {
+                    let member = read_list_pack_entry(cursor)?;
+                    length -= 1;
+                    members.push(member);
+                }
+                let end = cursor.read_u8()?;
+                if end != 255 {
+                    panic!("listpack expect 255 but {}", end);
+                }
+                event_handler.handle(Event::RDB(Object::Set(Set {
+                    key: &key,
+                    members: &members,
+                    meta,
+                })));
+            }
+            RDB_TYPE_STREAM_LISTPACKS_3 => {
+                unimplemented!()
+            }
+            RDB_TYPE_HASH_METADATA_PRE_GA => {
+                unimplemented!()
+            }
+            RDB_TYPE_HASH_LISTPACK_EX_PRE_GA => {
+                unimplemented!()
+            }
+            RDB_TYPE_HASH_METADATA => {
+                unimplemented!()
+            }
+            RDB_TYPE_HASH_LISTPACK_EX => {
+                unimplemented!()
+            }
+            _ => unimplemented!("data type: {}", value_type),
         }
         Ok(())
     }
@@ -773,7 +905,7 @@ fn read_list_pack_entry(input: &mut dyn Read) -> Result<Vec<u8>> {
         bytes = vec![0; len as usize];
         input.read_exact(&mut bytes)?;
     } else if (special & 0xFF) == 0xF0 {
-        let len = input.read_u32::<BigEndian>()?;
+        let len = input.read_u32::<LittleEndian>()?;
         skip = 5 + len as i32;
         bytes = vec![0; len as usize];
         input.read_exact(&mut bytes)?;
@@ -1115,6 +1247,16 @@ pub(crate) const RDB_TYPE_ZSET_ZIPLIST: u8 = 12;
 pub(crate) const RDB_TYPE_HASH_ZIPLIST: u8 = 13;
 pub(crate) const RDB_TYPE_LIST_QUICKLIST: u8 = 14;
 pub(crate) const RDB_TYPE_STREAM_LISTPACKS: u8 = 15;
+pub(crate) const RDB_TYPE_HASH_LISTPACK: u8 = 16;
+pub(crate) const RDB_TYPE_ZSET_LISTPACK: u8 = 17;
+pub(crate) const RDB_TYPE_LIST_QUICKLIST_2: u8 = 18;
+pub(crate) const RDB_TYPE_STREAM_LISTPACKS_2: u8 = 19;
+pub(crate) const RDB_TYPE_SET_LISTPACK: u8 = 20;
+pub(crate) const RDB_TYPE_STREAM_LISTPACKS_3: u8 = 21;
+pub(crate) const RDB_TYPE_HASH_METADATA_PRE_GA: u8 = 22; /* Hash with HFEs. Doesn't attach min TTL at start (7.4 RC) */
+pub(crate) const RDB_TYPE_HASH_LISTPACK_EX_PRE_GA: u8 = 23; /* Hash LP with HFEs. Doesn't attach min TTL at start (7.4 RC) */
+pub(crate) const RDB_TYPE_HASH_METADATA: u8 = 24; /* Hash with HFEs. Attach min TTL at start */
+pub(crate) const RDB_TYPE_HASH_LISTPACK_EX: u8 = 25; /* Hash LP with HFEs. Attach min TTL at start */
 
 /// Special RDB opcodes
 ///
@@ -1136,6 +1278,8 @@ pub(crate) const RDB_OPCODE_EXPIRETIME: u8 = 253;
 pub(crate) const RDB_OPCODE_SELECTDB: u8 = 254;
 // End of the RDB file.
 pub(crate) const RDB_OPCODE_EOF: u8 = 255;
+pub(crate) const RDB_OPCODE_FUNCTION: u8 = 246;
+pub(crate) const RDB_OPCODE_FUNCTION2: u8 = 245;
 
 pub(crate) const RDB_MODULE_OPCODE_EOF: isize = 0;
 

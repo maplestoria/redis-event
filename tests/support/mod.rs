@@ -10,6 +10,8 @@ use std::{env, fs, io::Write, path::PathBuf, process, thread::sleep, time::Durat
 
 use std::string::ToString;
 
+use redis::ProtocolVersion;
+
 #[derive(PartialEq)]
 enum ServerType {
     Tcp { tls: bool },
@@ -57,6 +59,7 @@ impl RedisServer {
                         host: "127.0.0.1".to_string(),
                         port: redis_port,
                         insecure: true,
+                        tls_params: None,
                     }
                 } else {
                     redis::ConnectionAddr::Tcp("127.0.0.1".to_string(), redis_port)
@@ -150,6 +153,7 @@ impl RedisServer {
                     host: "127.0.0.1".to_string(),
                     port,
                     insecure: true,
+                    tls_params: None,
                 };
                 let mut stunnel_cmd = process::Command::new("stunnel");
                 stunnel_cmd
@@ -216,10 +220,13 @@ impl TestContext {
         let server = RedisServer::new();
 
         let client = redis::Client::open(redis::ConnectionInfo {
-            addr: Box::new(server.get_client_addr().clone()),
-            db: 0,
-            username: None,
-            passwd: None,
+            addr: server.get_client_addr().clone(),
+            redis: redis::RedisConnectionInfo {
+                db: 0,
+                username: None,
+                password: None,
+                protocol: ProtocolVersion::RESP2,
+            },
         })
         .unwrap();
         let mut con;
@@ -245,7 +252,7 @@ impl TestContext {
                 }
             }
         }
-        redis::cmd("FLUSHDB").execute(&mut con);
+        redis::cmd("FLUSHDB").exec(&mut con).unwrap();
 
         TestContext { server, client }
     }

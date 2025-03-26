@@ -80,7 +80,7 @@ pub(crate) fn parse_xclaim(mut iter: Iter<Vec<u8>>) -> XCLAIM {
     let mut retry_count = None;
     let mut force = None;
     let mut just_id = None;
-    for arg in iter.next() {
+    if let Some(arg) = iter.next() {
         let arg_string = String::from_utf8_lossy(arg);
         let p_arg = &arg_string.to_uppercase();
         if p_arg == "IDLE" {
@@ -169,7 +169,7 @@ pub(crate) fn parse_xgroup(mut iter: Iter<Vec<u8>>) -> XGROUP {
     let mut set_id = None;
     let mut destroy = None;
     let mut del_consumer = None;
-    for arg in iter.next() {
+    if let Some(arg) = iter.next() {
         let arg_string = String::from_utf8_lossy(arg);
         let p_arg = &arg_string.to_uppercase();
         if p_arg == "CREATE" {
