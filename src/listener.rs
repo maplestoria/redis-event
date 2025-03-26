@@ -12,7 +12,7 @@ use std::result::Result::Ok;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use log::{error, info, warn};
 #[cfg(feature = "tls")]
@@ -24,7 +24,6 @@ use crate::rdb::DefaultRDBParser;
 use crate::resp::{Resp, RespDecode, Type};
 use crate::{EventHandler, ModuleParser, NoOpEventHandler, RDBParser, RedisListener, cmd, io};
 use scheduled_thread_pool::{JobHandle, ScheduledThreadPool};
-use std::fs::File;
 
 /// 用于监听单个Redis实例的事件
 pub struct Listener {
