@@ -28,30 +28,40 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: root suid tar
+      run: sudo chown root /bin/tar && sudo chmod u+s /bin/tar
+
     # Cache Cargo dependencies
     - name: Cache Cargo
       uses: actions/cache@v3
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-cargo
-    
+
+    # Cache APT dependencies
+    - name: Cache APT packages
+      uses: actions/cache@v3
+      with:
+        path: /var/cache/apt
+        key: ${{ runner.os }}-apt-${{ hashFiles('**/rust.yml') }}
+
     - name: Set up Redis and stunnel
       run: |
-        sudo apt-get install lsb-release curl gpg
+        sudo apt-get install -y lsb-release curl gpg
         curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
         sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
         echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
         sudo apt-get update
-        sudo apt-get install redis stunnel openssl libssl-dev -y
+        sudo apt-get install -y redis stunnel openssl libssl-dev
         
     - name: Install tarpaulin
       run: cargo install cargo-tarpaulin
       
     - name: Run tests
-      run: cargo tarpaulin --out Xml
+      run: cargo tarpaulin --all-features --out Xml
       
     - name: Upload to codecov.io
       uses: codecov/codecov-action@v2
       with:
-        token: ${{secrets.CODECOV_TOKEN}}
+        token: ${{ secrets.CODECOV_TOKEN }}
         fail_ci_if_error: true

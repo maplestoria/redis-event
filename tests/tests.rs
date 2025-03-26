@@ -657,7 +657,6 @@ fn test_aof() {
             match cmd {
                 Event::RDB(_) => {}
                 Event::AOF(cmd) => {
-                    println!("{:?}", cmd);
                     if let Ok(mut count) = self.count.lock() {
                         let c = count.borrow_mut();
                         let c = c.deref_mut();
@@ -721,10 +720,14 @@ fn test_aof() {
             repl_offset: -1,
             read_timeout: None,
             write_timeout: None,
+            #[cfg(feature = "tls")]
             is_tls_enabled: false,
+            #[cfg(feature = "tls")]
             is_tls_insecure: false,
+            #[cfg(feature = "tls")]
             identity: None,
             username: "".to_string(),
+            #[cfg(feature = "tls")]
             identity_passwd: None,
         };
         let running = Arc::new(AtomicBool::new(true));
@@ -800,6 +803,7 @@ fn test_aof() {
     assert_eq!(13, *cmd_count.lock().unwrap().deref());
 }
 
+#[cfg(feature = "tls")]
 #[test]
 #[serial]
 fn test_tls() {
@@ -823,10 +827,14 @@ fn test_tls() {
         repl_offset: -1,
         read_timeout: None,
         write_timeout: None,
+        #[cfg(feature = "tls")]
         is_tls_enabled: true,
+        #[cfg(feature = "tls")]
         is_tls_insecure: true,
+        #[cfg(feature = "tls")]
         identity: None,
         username: "".to_string(),
+        #[cfg(feature = "tls")]
         identity_passwd: None,
     };
     let running = Arc::new(AtomicBool::new(true));
@@ -863,9 +871,13 @@ fn start_redis_test(rdb: &str, port: u16, rdb_handler: Rc<RefCell<dyn EventHandl
         repl_offset: -1,
         read_timeout: None,
         write_timeout: None,
+        #[cfg(feature = "tls")]
         is_tls_enabled: false,
+        #[cfg(feature = "tls")]
         is_tls_insecure: false,
+        #[cfg(feature = "tls")]
         identity: None,
+        #[cfg(feature = "tls")]
         identity_passwd: None,
     };
     let running = Arc::new(AtomicBool::new(true));

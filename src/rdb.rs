@@ -98,7 +98,7 @@ pub trait RDBDecode: Read {
                     let mut compressed = vec![0; compressed_len as usize];
                     self.read_exact(&mut compressed)?;
                     let mut origin = vec![0; origin_len as usize];
-                    lzf::decompress(&mut compressed, compressed_len, &mut origin, origin_len);
+                    lzf::decompress(&compressed, &mut origin);
                     return Ok(origin);
                 }
                 _ => panic!("Invalid string length: {}", length),

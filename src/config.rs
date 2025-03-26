@@ -28,12 +28,16 @@ pub struct Config {
     pub read_timeout: Option<Duration>,
     /// Write Timeout
     pub write_timeout: Option<Duration>,
+    #[cfg(feature = "tls")]
     /// 是否启用TLS
     pub is_tls_enabled: bool,
+    #[cfg(feature = "tls")]
     /// 是否信任无效的证书和域名
     pub is_tls_insecure: bool,
+    #[cfg(feature = "tls")]
     /// 客户端认证所使用的Key
     pub identity: Option<String>,
+    #[cfg(feature = "tls")]
     /// 解密Key所需的密码
     pub identity_passwd: Option<String>,
 }
@@ -51,9 +55,13 @@ impl Clone for Config {
             repl_offset: self.repl_offset,
             read_timeout: self.read_timeout,
             write_timeout: self.write_timeout,
+            #[cfg(feature = "tls")]
             is_tls_enabled: self.is_tls_enabled,
+            #[cfg(feature = "tls")]
             is_tls_insecure: self.is_tls_insecure,
+            #[cfg(feature = "tls")]
             identity: self.identity.clone(),
+            #[cfg(feature = "tls")]
             identity_passwd: self.identity_passwd.clone(),
         }
     }

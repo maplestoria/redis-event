@@ -15,6 +15,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info, warn};
+#[cfg(feature = "tls")]
 use native_tls::{Identity, TlsConnector, TlsStream};
 
 use crate::config::Config;
@@ -51,6 +52,8 @@ impl Listener {
             .set_write_timeout(self.config.write_timeout)
             .expect("write timeout set failed");
 
+        info!("Connected to server {}", &addr);
+
         let socket_addr = stream.local_addr().unwrap();
         let local_ip = socket_addr.ip().to_string();
         self.local_ip = Some(local_ip);
@@ -58,32 +61,34 @@ impl Listener {
         let local_port = socket_addr.port();
         self.local_port = Some(local_port);
 
-        if self.config.is_tls_enabled {
-            let mut builder = TlsConnector::builder();
-            builder.danger_accept_invalid_hostnames(self.config.is_tls_insecure);
-            builder.danger_accept_invalid_certs(self.config.is_tls_insecure);
+        if cfg!(feature = "tls") {
+            #[cfg(feature = "tls")]
+            if self.config.is_tls_enabled {
+                let mut builder = TlsConnector::builder();
+                builder.danger_accept_invalid_hostnames(self.config.is_tls_insecure);
+                builder.danger_accept_invalid_certs(self.config.is_tls_insecure);
 
-            if let Some(id) = &self.config.identity {
-                let mut file = File::open(id)?;
-                let mut buff = Vec::new();
-                file.read_to_end(&mut buff)?;
-                let identity_passwd = match &self.config.identity_passwd {
-                    None => "",
-                    Some(passwd) => passwd.as_str(),
-                };
-                let identity = Identity::from_pkcs12(&buff, identity_passwd).expect("解析key失败");
-                builder.identity(identity);
+                if let Some(id) = &self.config.identity {
+                    let mut file = File::open(id)?;
+                    let mut buff = Vec::new();
+                    file.read_to_end(&mut buff)?;
+                    let identity_passwd = match &self.config.identity_passwd {
+                        None => "",
+                        Some(passwd) => passwd.as_str(),
+                    };
+                    let identity = Identity::from_pkcs12(&buff, identity_passwd).expect("解析key失败");
+                    builder.identity(identity);
+                }
+
+                let connector = builder.build().unwrap();
+                let tls_stream = connector
+                    .connect(&self.config.host, stream)
+                    .expect("TLS connect failed");
+                self.conn = Option::Some(Stream::Tls(tls_stream));
+                return Ok(());
             }
-
-            let connector = builder.build().unwrap();
-            let tls_stream = connector
-                .connect(&self.config.host, stream)
-                .expect("TLS connect failed");
-            self.conn = Option::Some(Stream::Tls(tls_stream));
-        } else {
-            self.conn = Option::Some(Stream::Tcp(stream));
         }
-        info!("Connected to server {}", &addr);
+        self.conn = Option::Some(Stream::Tcp(stream));
         Ok(())
     }
 
@@ -101,6 +106,7 @@ impl Listener {
                     send(tcp_stream, b"AUTH", &args)?;
                     tcp_stream
                 }
+                #[cfg(feature = "tls")]
                 Stream::Tls(tls_stream) => {
                     send(tls_stream, b"AUTH", &args)?;
                     tls_stream
@@ -122,6 +128,7 @@ impl Listener {
         let conn = self.conn.as_mut().unwrap();
         match conn {
             Stream::Tcp(tcp_stream) => Listener::de_send_replica_info(&port, &ip, tcp_stream)?,
+            #[cfg(feature = "tls")]
             Stream::Tls(tls_stream) => Listener::de_send_replica_info(&port, &ip, tls_stream)?,
         };
         Ok(())
@@ -189,6 +196,7 @@ impl Listener {
 
                 let conn: &mut dyn Read = match conn {
                     Stream::Tcp(tcp_stream) => tcp_stream,
+                    #[cfg(feature = "tls")]
                     Stream::Tls(tls_stream) => tls_stream,
                 };
                 let mut reader = BufReader::new(conn);
@@ -226,6 +234,7 @@ impl Listener {
 
                 tcp_stream
             }
+            #[cfg(feature = "tls")]
             Stream::Tls(tls_stream) => {
                 send(tls_stream, b"PSYNC", &[repl_id, repl_offset])?;
                 tls_stream
@@ -293,6 +302,7 @@ impl Listener {
                 send(tcp_stream, b"SYNC", &vec![])?;
                 tcp_stream
             }
+            #[cfg(feature = "tls")]
             Stream::Tls(tls_stream) => {
                 send(tls_stream, b"SYNC", &vec![])?;
                 tls_stream
@@ -317,12 +327,14 @@ impl Listener {
         if let Mode::Sync = mode {
             return;
         }
+        #[cfg(feature = "tls")]
         if self.config.is_tls_enabled {
             return;
         }
         let conn = self.conn.as_ref().unwrap();
         let conn = match conn {
             Stream::Tcp(tcp_stream) => tcp_stream,
+            #[cfg(feature = "tls")]
             Stream::Tls(_) => panic!("Expect TcpStream"),
         };
         let mut conn_clone = conn.try_clone().unwrap();
@@ -371,6 +383,7 @@ impl Listener {
                     }
                 }
             }
+            #[cfg(feature = "tls")]
             Stream::Tls(tls_stream) => {
                 let mut timer = Instant::now();
                 let one_sec = Duration::from_secs(1);
@@ -577,5 +590,6 @@ impl Builder {
 
 enum Stream {
     Tcp(TcpStream),
+    #[cfg(feature = "tls")]
     Tls(TlsStream<TcpStream>),
 }
